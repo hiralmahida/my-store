@@ -15,11 +15,8 @@ import { getCart, getActiveCartId } from "@/src/lib/cart";
 import { getCurrentUser } from "@/src/lib/auth";
 import { formatQAR } from "@/src/lib/format";
 import { getPaymentProvider } from "@/src/lib/payments";
-import {
-  publishStockChange,
-  publishOrderStatus,
-  publishAdminNotification,
-} from "@/src/lib/events";
+import { publishStockChange, publishOrderStatus } from "@/src/lib/events";
+import { recordNotification } from "@/src/lib/notifications";
 import type { PaymentMethod } from "@/app/generated/prisma/client";
 
 // Products at or below this level trigger a low-stock admin notification.
@@ -149,28 +146,24 @@ export async function placeOrder(
     )
   );
 
-  // Broadcast real-time updates over the event bus (best-effort — a publish
-  // failure must never fail an already-committed order).
+  // Broadcast real-time updates + record admin notifications (best-effort — a
+  // publish/record failure must never fail an already-committed order).
   try {
-    const now = new Date().toISOString();
     for (const u of order.stockUpdates) {
       publishStockChange(u.productId, u.stock);
       if (u.stock <= LOW_STOCK_THRESHOLD) {
-        publishAdminNotification({
-          kind: "low-stock",
-          message: `Low stock: ${u.name} (${u.stock} left)`,
-          at: now,
-          meta: { productId: u.productId, stock: u.stock },
+        await recordNotification("LOW_STOCK", `Low stock: ${u.name} (${u.stock} left)`, {
+          productId: u.productId,
+          stock: u.stock,
         });
       }
     }
     publishOrderStatus(order.id, "PAID");
-    publishAdminNotification({
-      kind: "new-order",
-      message: `New order #${order.id.slice(-8).toUpperCase()} — ${formatQAR(cart.total)}`,
-      at: now,
-      meta: { orderId: order.id, total: cart.total },
-    });
+    await recordNotification(
+      "NEW_ORDER",
+      `New order #${order.id.slice(-8).toUpperCase()} — ${formatQAR(cart.total)}`,
+      { orderId: order.id, total: cart.total }
+    );
   } catch {
     // Real-time is non-critical; ignore failures.
   }

@@ -99,6 +99,7 @@ enum OrderStatus {
   SHIPPED
   DELIVERED
   CANCELLED
+  REFUNDED
 }
 
 /// A customer order. Defined now so the schema is ready for a future
@@ -267,4 +268,27 @@ model Session {
   createdAt DateTime @default(now())
 
   @@index([userId])
+}
+
+// ---------------------------------------------------------------------------
+// Admin notifications (Phase 7)
+//
+// Persisted so the admin dashboard shows recent history; new ones are also
+// pushed live over the SSE event bus (see src/lib/events.ts) as they happen.
+// ---------------------------------------------------------------------------
+
+enum NotificationKind {
+  NEW_ORDER
+  LOW_STOCK
+}
+
+model Notification {
+  id        String           @id @default(cuid())
+  kind      NotificationKind
+  message   String
+  meta      Json             @default("{}") // e.g. { orderId } or { productId, stock }
+  read      Boolean          @default(false)
+  createdAt DateTime         @default(now())
+
+  @@index([createdAt])
 }
