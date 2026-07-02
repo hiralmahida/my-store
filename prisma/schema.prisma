@@ -1,0 +1,131 @@
+// Prisma schema for the electronics store.
+// Learn more: https://pris.ly/d/prisma-schema
+//
+// Prisma 7 uses the new `prisma-client` generator. The generated client is
+// written to `app/generated/prisma` (git-ignored) and imported from there by
+// our singleton in `src/lib/prisma.ts`.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../app/generated/prisma"
+}
+
+// The connection string (DATABASE_URL) is supplied by `prisma.config.ts`,
+// which loads it from your `.env` file — so it is intentionally NOT repeated
+// here.
+datasource db {
+  provider = "postgresql"
+}
+
+// ---------------------------------------------------------------------------
+// Catalog
+// ---------------------------------------------------------------------------
+
+/// A product category, e.g. "Laptops". Categories can nest via `parent`
+/// (a self-relation) so you can model subcategories like "Gaming Laptops".
+model Category {
+  id       String  @id @default(cuid())
+  name     String
+  slug     String  @unique // URL-friendly identifier, e.g. "laptops"
+  image    String? // optional banner/thumbnail URL
+
+  // Self-relation: a category may have one parent and many children.
+  parentId String?
+  parent   Category?  @relation("CategoryHierarchy", fields: [parentId], references: [id])
+  children Category[] @relation("CategoryHierarchy")
+
+  products  Product[]
+  createdAt DateTime  @default(now())
+
+  @@index([parentId])
+}
+
+/// A manufacturer / brand, e.g. "Apple" or "Samsung".
+model Brand {
+  id       String    @id @default(cuid())
+  name     String
+  slug     String    @unique
+  logo     String? // optional logo URL
+  products Product[]
+}
+
+/// A sellable product. Prices are stored in QAR using a fixed-precision
+/// Decimal so money math stays exact (never use Float for currency).
+model Product {
+  id          String   @id @default(cuid())
+  name        String
+  slug        String   @unique
+  description String   @db.Text
+  price       Decimal  @db.Decimal(10, 2) // amount in QAR
+  stock       Int      @default(0)
+  featured    Boolean  @default(false) // show on the homepage grid
+  specs       Json     @default("{}") // flexible key/value tech specs
+  createdAt   DateTime @default(now())
+
+  // Each product belongs to one category and one brand.
+  categoryId String
+  category   Category @relation(fields: [categoryId], references: [id])
+  brandId    String
+  brand      Brand    @relation(fields: [brandId], references: [id])
+
+  // One product has many images.
+  images     ProductImage[]
+  orderItems OrderItem[]
+
+  @@index([categoryId])
+  @@index([brandId])
+}
+
+/// An image belonging to a product. A product can have several.
+model ProductImage {
+  id        String  @id @default(cuid())
+  url       String
+  alt       String? // accessible alt text
+  productId String
+  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@index([productId])
+}
+
+// ---------------------------------------------------------------------------
+// Orders (schema only — no checkout logic is built in Phase 1)
+// ---------------------------------------------------------------------------
+
+enum OrderStatus {
+  PENDING
+  PAID
+  SHIPPED
+  DELIVERED
+  CANCELLED
+}
+
+/// A customer order. Defined now so the schema is ready for a future
+/// checkout phase; nothing writes to it yet.
+model Order {
+  id              String      @id @default(cuid())
+  customerName    String
+  customerEmail   String
+  customerPhone   String?
+  shippingAddress String?
+  status          OrderStatus @default(PENDING)
+  total           Decimal     @db.Decimal(10, 2) // order total in QAR
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+  items           OrderItem[]
+}
+
+/// A single line item within an order. `unitPrice` snapshots the product's
+/// price at purchase time so historical orders stay accurate even if the
+/// product price later changes.
+model OrderItem {
+  id        String  @id @default(cuid())
+  orderId   String
+  order     Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  productId String
+  product   Product @relation(fields: [productId], references: [id])
+  quantity  Int
+  unitPrice Decimal @db.Decimal(10, 2) // QAR price captured at purchase time
+
+  @@index([orderId])
+  @@index([productId])
+}
