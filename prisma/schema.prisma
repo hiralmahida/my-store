@@ -114,9 +114,10 @@ model Order {
   createdAt       DateTime    @default(now())
   updatedAt       DateTime    @updatedAt
   items           OrderItem[]
+  payment         Payment?
 
   // Optional link to a registered user (guest checkout leaves this null).
-  // Populated once checkout is built, powering the account order history.
+  // Populated at checkout, powering the account order history.
   userId String?
   user   User?   @relation(fields: [userId], references: [id])
 
@@ -137,6 +138,39 @@ model OrderItem {
 
   @@index([orderId])
   @@index([productId])
+}
+
+// ---------------------------------------------------------------------------
+// Payments (Phase 5)
+//
+// Payment is processed through a swappable provider interface (see
+// src/lib/payments.ts). For the demo the providers are simulated (a test-card
+// processor and a BNPL/installment stub); a real provider like Stripe can be
+// dropped in behind the same interface. We never store raw card data.
+// ---------------------------------------------------------------------------
+
+enum PaymentMethod {
+  CARD
+  BNPL
+}
+
+enum PaymentStatus {
+  PENDING
+  SUCCEEDED
+  FAILED
+}
+
+/// A payment against an order. One payment per order for now.
+model Payment {
+  id        String        @id @default(cuid())
+  orderId   String        @unique
+  order     Order         @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  method    PaymentMethod
+  provider  String // which provider handled it, e.g. "mock-card" / "mock-bnpl"
+  reference String // provider transaction reference
+  amount    Decimal       @db.Decimal(10, 2) // QAR
+  status    PaymentStatus @default(PENDING)
+  createdAt DateTime      @default(now())
 }
 
 // ---------------------------------------------------------------------------

@@ -172,17 +172,12 @@ export default async function CartPage() {
             with BNPL
           </p>
 
-          {/* Checkout & payments are a later phase; be honest rather than fake it. */}
-          <button
-            type="button"
-            disabled
-            className="mt-5 w-full cursor-not-allowed rounded-lg bg-slate-200 px-4 py-3 text-sm font-semibold text-slate-500"
+          <Link
+            href="/checkout"
+            className="mt-5 block w-full rounded-lg bg-blue-600 px-4 py-3 text-center text-sm font-semibold text-white transition hover:bg-blue-700"
           >
             Proceed to Checkout
-          </button>
-          <p className="mt-2 text-center text-xs text-slate-400">
-            Checkout &amp; payments arrive in a later phase.
-          </p>
+          </Link>
 
           <Link
             href="/products"

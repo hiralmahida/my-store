@@ -128,6 +128,16 @@ export async function getCartItemCount(): Promise<number> {
   return result._sum.quantity ?? 0;
 }
 
+/** The current actor's cart id (user or guest), or null if there's no cart. */
+export async function getActiveCartId(): Promise<string | null> {
+  const owner = await currentCartOwner();
+  if (!owner) return null;
+  const cart = await withDbRetry(() =>
+    prisma.cart.findUnique({ where: owner, select: { id: true } })
+  );
+  return cart?.id ?? null;
+}
+
 // --- Wishlist ---------------------------------------------------------------
 
 const wishlistInclude = {
