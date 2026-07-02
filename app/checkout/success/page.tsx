@@ -4,6 +4,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { getOrderById } from "@/src/lib/orders";
+import LiveOrderStatus from "@/app/components/LiveOrderStatus";
 import { formatQAR } from "@/src/lib/format";
 
 export const dynamic = "force-dynamic";
@@ -44,6 +45,10 @@ export default async function CheckoutSuccessPage({
           </span>{" "}
           · a confirmation was sent to {order.customerEmail}.
         </p>
+        <div className="mt-3 flex items-center justify-center gap-2 text-sm text-slate-500">
+          <span>Status:</span>
+          <LiveOrderStatus orderId={order.id} initialStatus={order.status} />
+        </div>
       </div>
 
       <div className="mt-8 rounded-2xl border border-slate-200 p-6">

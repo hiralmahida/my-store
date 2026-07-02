@@ -9,6 +9,7 @@ import { notFound } from "next/navigation";
 import ProductGallery from "@/app/components/ProductGallery";
 import AddToCartButton from "@/app/components/AddToCartButton";
 import WishlistButton from "@/app/components/WishlistButton";
+import LiveStock from "@/app/components/LiveStock";
 import ProductGrid from "@/app/components/ProductGrid";
 import { getProductBySlug, getRelatedProducts } from "@/src/lib/products";
 import { isWishlisted } from "@/src/lib/cart";
@@ -71,14 +72,7 @@ export default async function ProductPage({
       ? Object.entries(product.specs as Record<string, unknown>)
       : [];
 
-  // Stock status → label + color.
   const stock = product.stock;
-  const stockBadge =
-    stock === 0
-      ? { text: "Out of stock", className: "bg-slate-100 text-slate-500" }
-      : stock <= 5
-        ? { text: `Only ${stock} left`, className: "bg-amber-100 text-amber-800" }
-        : { text: `In stock (${stock} available)`, className: "bg-green-100 text-green-800" };
 
   return (
     <div className="mx-auto max-w-7xl px-4 py-10 sm:px-6 lg:px-8">
@@ -108,14 +102,9 @@ export default async function ProductPage({
             {product.name}
           </h1>
 
-          {/* Stock badge. In the real-time phase this becomes a live-updating
-              indicator driven over WebSockets; the markup is ready for it. */}
+          {/* Live stock — updates over SSE the moment it changes anywhere. */}
           <div className="mt-4">
-            <span
-              className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold ${stockBadge.className}`}
-            >
-              {stockBadge.text}
-            </span>
+            <LiveStock productId={product.id} initialStock={stock} />
           </div>
 
           {/* Price + BNPL split */}

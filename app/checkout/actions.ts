@@ -13,8 +13,17 @@ import { prisma } from "@/src/lib/prisma";
 import { withDbRetry } from "@/src/lib/db";
 import { getCart, getActiveCartId } from "@/src/lib/cart";
 import { getCurrentUser } from "@/src/lib/auth";
+import { formatQAR } from "@/src/lib/format";
 import { getPaymentProvider } from "@/src/lib/payments";
+import {
+  publishStockChange,
+  publishOrderStatus,
+  publishAdminNotification,
+} from "@/src/lib/events";
 import type { PaymentMethod } from "@/app/generated/prisma/client";
+
+// Products at or below this level trigger a low-stock admin notification.
+const LOW_STOCK_THRESHOLD = 5;
 
 export interface CheckoutState {
   error?: string;
@@ -119,22 +128,52 @@ export async function placeOrder(
           },
         });
 
-        // Decrement stock for each purchased item.
+        // Decrement stock for each purchased item, capturing the new levels so
+        // we can broadcast them after the transaction commits.
+        const stockUpdates: { productId: string; stock: number; name: string }[] = [];
         for (const item of cart.items) {
-          await tx.product.update({
+          const updated = await tx.product.update({
             where: { id: item.productId },
             data: { stock: { decrement: item.quantity } },
+            select: { id: true, stock: true, name: true },
           });
+          stockUpdates.push({ productId: updated.id, stock: updated.stock, name: updated.name });
         }
 
         // Empty the cart (cascades its items).
         if (cartId) await tx.cart.delete({ where: { id: cartId } });
 
-        return created;
+        return { id: created.id, stockUpdates };
       },
       { maxWait: 15000, timeout: 20000 }
     )
   );
+
+  // Broadcast real-time updates over the event bus (best-effort — a publish
+  // failure must never fail an already-committed order).
+  try {
+    const now = new Date().toISOString();
+    for (const u of order.stockUpdates) {
+      publishStockChange(u.productId, u.stock);
+      if (u.stock <= LOW_STOCK_THRESHOLD) {
+        publishAdminNotification({
+          kind: "low-stock",
+          message: `Low stock: ${u.name} (${u.stock} left)`,
+          at: now,
+          meta: { productId: u.productId, stock: u.stock },
+        });
+      }
+    }
+    publishOrderStatus(order.id, "PAID");
+    publishAdminNotification({
+      kind: "new-order",
+      message: `New order #${order.id.slice(-8).toUpperCase()} — ${formatQAR(cart.total)}`,
+      at: now,
+      meta: { orderId: order.id, total: cart.total },
+    });
+  } catch {
+    // Real-time is non-critical; ignore failures.
+  }
 
   revalidatePath("/", "layout"); // header cart badge resets to 0
   redirect(`/checkout/success?order=${order.id}`);
