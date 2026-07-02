@@ -1,48 +1,62 @@
-// The product page's primary call-to-action.
-//
-// The cart itself is the next build phase, so rather than fake an "added to
-// cart" flow, this button honestly tells the shopper the feature is coming.
-// It's a real, functional Client Component (it reacts to clicks and gives
-// feedback) — not a placeholder stub.
+// The "Add to Cart" button. A Client Component: it calls the addToCart server
+// action inside a transition and shows inline feedback. The cart itself is
+// DB-backed (see app/cart/actions.ts); this just triggers the mutation.
 
 "use client";
 
-import { useState } from "react";
+import { useState, useTransition } from "react";
+import Link from "next/link";
+import { addToCart } from "@/app/cart/actions";
 
 export default function AddToCartButton({
+  productId,
   disabled = false,
+  size = "full",
 }: {
+  productId: string;
   disabled?: boolean;
+  size?: "full" | "compact";
 }) {
-  const [clicked, setClicked] = useState(false);
+  const [isPending, startTransition] = useTransition();
+  const [added, setAdded] = useState(false);
 
   if (disabled) {
     return (
       <button
         type="button"
         disabled
-        className="w-full cursor-not-allowed rounded-lg bg-slate-200 px-6 py-3 text-center text-sm font-semibold text-slate-500"
+        className="w-full cursor-not-allowed rounded-lg bg-slate-200 px-4 py-2.5 text-center text-sm font-semibold text-slate-500"
       >
         Out of stock
       </button>
     );
   }
 
+  const handleClick = () => {
+    startTransition(async () => {
+      await addToCart(productId);
+      setAdded(true);
+    });
+  };
+
   return (
     <div>
       <button
         type="button"
-        onClick={() => setClicked(true)}
-        className="w-full rounded-lg bg-blue-600 px-6 py-3 text-center text-sm font-semibold text-white transition hover:bg-blue-700"
+        onClick={handleClick}
+        disabled={isPending}
+        className={`w-full rounded-lg bg-blue-600 px-4 text-center font-semibold text-white transition hover:bg-blue-700 disabled:opacity-70 ${
+          size === "compact" ? "py-2 text-xs" : "py-3 text-sm"
+        }`}
       >
-        Add to Cart
+        {isPending ? "Adding…" : added ? "Add another" : "Add to Cart"}
       </button>
-      {clicked && (
-        <p
-          role="status"
-          className="mt-2 text-center text-sm text-slate-500"
-        >
-          🛒 Cart &amp; checkout arrive in the next build phase.
+      {added && (
+        <p role="status" className="mt-2 text-center text-sm text-slate-500">
+          ✓ Added.{" "}
+          <Link href="/cart" className="font-medium text-blue-600 hover:underline">
+            View cart
+          </Link>
         </p>
       )}
     </div>

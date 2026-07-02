@@ -8,8 +8,10 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import ProductGallery from "@/app/components/ProductGallery";
 import AddToCartButton from "@/app/components/AddToCartButton";
+import WishlistButton from "@/app/components/WishlistButton";
 import ProductGrid from "@/app/components/ProductGrid";
 import { getProductBySlug, getRelatedProducts } from "@/src/lib/products";
+import { isWishlisted } from "@/src/lib/cart";
 import { formatQAR } from "@/src/lib/format";
 
 export const dynamic = "force-dynamic";
@@ -52,7 +54,10 @@ export default async function ProductPage({
   const product = await getProductBySlug(slug);
   if (!product) notFound();
 
-  const related = await getRelatedProducts(product);
+  const [related, wishlisted] = await Promise.all([
+    getRelatedProducts(product),
+    isWishlisted(product.id),
+  ]);
 
   // Prices: Prisma returns a Decimal; convert once for arithmetic. The BNPL
   // stub splits the total into 4 equal, interest-free installments (mimicking
@@ -129,7 +134,14 @@ export default async function ProductPage({
 
           {/* CTA */}
           <div className="mt-6 max-w-sm">
-            <AddToCartButton disabled={stock === 0} />
+            <div className="flex gap-3">
+              <div className="flex-1">
+                <AddToCartButton productId={product.id} disabled={stock === 0} />
+              </div>
+              <div className="w-32">
+                <WishlistButton productId={product.id} initialWishlisted={wishlisted} />
+              </div>
+            </div>
             <p className="mt-3 flex items-center gap-1.5 text-sm text-slate-500">
               <TruckIcon className="h-4 w-4" />
               Free local delivery across Qatar

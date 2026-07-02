@@ -69,8 +69,10 @@ model Product {
   brand      Brand    @relation(fields: [brandId], references: [id])
 
   // One product has many images.
-  images     ProductImage[]
-  orderItems OrderItem[]
+  images        ProductImage[]
+  orderItems    OrderItem[]
+  cartItems     CartItem[]
+  wishlistItems WishlistItem[]
 
   @@index([categoryId])
   @@index([brandId])
@@ -127,5 +129,54 @@ model OrderItem {
   unitPrice Decimal @db.Decimal(10, 2) // QAR price captured at purchase time
 
   @@index([orderId])
+  @@index([productId])
+}
+
+// ---------------------------------------------------------------------------
+// Cart & Wishlist (Phase 3)
+//
+// There is no auth yet, so a cart/wishlist belongs to an anonymous guest
+// identified by a random token stored in an httpOnly cookie. When auth arrives,
+// a guest cart can be merged into the signed-in user's cart by copying its
+// items over, then the guest cart is discarded.
+// ---------------------------------------------------------------------------
+
+/// A guest shopping cart, keyed by the session token from the cookie.
+model Cart {
+  id           String     @id @default(cuid())
+  sessionToken String     @unique // matches the `cart_session` cookie value
+  items        CartItem[]
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+}
+
+/// A line item in a cart. One row per product; `quantity` accumulates. The
+/// unique constraint guarantees a product appears at most once per cart, so
+/// "add again" increments the quantity instead of duplicating the row.
+model CartItem {
+  id        String   @id @default(cuid())
+  cartId    String
+  cart      Cart     @relation(fields: [cartId], references: [id], onDelete: Cascade)
+  productId String
+  product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  quantity  Int      @default(1)
+  createdAt DateTime @default(now())
+
+  @@unique([cartId, productId])
+  @@index([cartId])
+  @@index([productId])
+}
+
+/// A saved (wishlisted) product for a guest. Kept flat (keyed directly by the
+/// session token) since a wishlist is just a set of products with no quantities.
+model WishlistItem {
+  id           String   @id @default(cuid())
+  sessionToken String // matches the `cart_session` cookie value
+  productId    String
+  product      Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  createdAt    DateTime @default(now())
+
+  @@unique([sessionToken, productId])
+  @@index([sessionToken])
   @@index([productId])
 }
