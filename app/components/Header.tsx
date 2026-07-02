@@ -1,47 +1,54 @@
 // Site header: reusable across every page (rendered once in the root layout).
 //
-// It contains four things the brief asks for:
-//   1. A store-name logo placeholder
-//   2. A categories navigation bar
-//   3. A search input (visual only for now — no results page yet)
-//   4. A cart icon placeholder
+// It contains:
+//   1. The FirstStop wordmark/logo
+//   2. A category navigation bar (now data-driven from the database)
+//   3. A search box that submits to /search
+//   4. A cart icon (cart is built in a later phase)
 //
-// This is a presentational Server Component (no client-side state yet), so it
-// ships zero JavaScript to the browser. The category list is a static array
-// for Phase 1; a later phase can make it data-driven from the database.
+// This is an async Server Component: it queries the categories on the server so
+// the nav always matches the seeded catalog, and ships zero JavaScript to the
+// browser. If the database is temporarily unavailable, it falls back to a
+// static category list so the site chrome still renders.
 
 import Link from "next/link";
+import { getCategories, type CategoryOption } from "@/src/lib/products";
 
-// Top-level categories shown in the nav. `slug` matches the seeded categories,
-// so these links will point at real category pages once those are built.
-const NAV_CATEGORIES: { name: string; slug: string }[] = [
-  { name: "Mobile Phones", slug: "mobile-phones" },
+// Fallback nav shown if the categories query fails (e.g. DB not seeded yet).
+const FALLBACK_CATEGORIES: Pick<CategoryOption, "name" | "slug">[] = [
+  { name: "Phones", slug: "phones" },
   { name: "Laptops", slug: "laptops" },
   { name: "Tablets", slug: "tablets" },
-  { name: "Smart Watches", slug: "smart-watches" },
-  { name: "Audio", slug: "audio" },
-  { name: "Smart Home", slug: "smart-home" },
-  { name: "Gaming", slug: "gaming" },
+  { name: "TVs", slug: "tvs" },
+  { name: "Home Appliances", slug: "appliances" },
   { name: "Accessories", slug: "accessories" },
 ];
 
-export default function Header() {
+export default async function Header() {
+  // Data-driven nav. Guard against DB errors so the header never crashes a page.
+  let categories: Pick<CategoryOption, "name" | "slug">[];
+  try {
+    const fromDb = await getCategories();
+    categories = fromDb.length > 0 ? fromDb : FALLBACK_CATEGORIES;
+  } catch {
+    categories = FALLBACK_CATEGORIES;
+  }
+
   return (
     <header className="sticky top-0 z-50 border-b border-slate-200 bg-white/90 backdrop-blur">
       {/* Top row: logo, search, cart */}
       <div className="mx-auto flex max-w-7xl items-center gap-4 px-4 py-3 sm:px-6 lg:px-8">
-        {/* Logo placeholder — a simple mark + wordmark */}
+        {/* Logo */}
         <Link href="/" className="flex shrink-0 items-center gap-2">
           <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-blue-600 text-sm font-bold text-white">
-            V
+            F
           </span>
           <span className="text-lg font-semibold tracking-tight text-slate-900">
-            Volt<span className="text-blue-600">Electronics</span>
+            First<span className="text-blue-600">Stop</span>
           </span>
         </Link>
 
-        {/* Search — a plain form for now. It submits to /search (not built yet),
-            so it degrades gracefully instead of throwing. */}
+        {/* Search — submits to /search via GET, so it works without JS. */}
         <form
           action="/search"
           className="relative hidden flex-1 items-center md:flex"
@@ -50,13 +57,13 @@ export default function Header() {
           <input
             type="search"
             name="q"
-            placeholder="Search for phones, laptops, audio…"
+            placeholder="Search for phones, laptops, TVs…"
             aria-label="Search products"
             className="w-full rounded-full border border-slate-200 bg-slate-50 py-2 pl-10 pr-4 text-sm text-slate-900 outline-none transition focus:border-blue-500 focus:bg-white focus:ring-2 focus:ring-blue-100"
           />
         </form>
 
-        {/* Cart icon placeholder — a link with a static item-count badge. */}
+        {/* Cart icon (cart is a later phase). */}
         <Link
           href="/cart"
           aria-label="Cart"
@@ -72,7 +79,15 @@ export default function Header() {
       {/* Second row: categories nav. Scrolls horizontally on small screens. */}
       <nav className="border-t border-slate-100 bg-white">
         <ul className="mx-auto flex max-w-7xl gap-1 overflow-x-auto px-2 py-1 sm:px-4 lg:px-6 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-          {NAV_CATEGORIES.map((category) => (
+          <li>
+            <Link
+              href="/products"
+              className="block whitespace-nowrap rounded-md px-3 py-2 text-sm font-medium text-slate-600 transition hover:bg-slate-100 hover:text-slate-900"
+            >
+              All
+            </Link>
+          </li>
+          {categories.map((category) => (
             <li key={category.slug}>
               <Link
                 href={`/category/${category.slug}`}

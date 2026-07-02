@@ -10,10 +10,10 @@ const FOOTER_SECTIONS: { title: string; links: { label: string; href: string }[]
     {
       title: "Shop",
       links: [
-        { label: "Mobile Phones", href: "/category/mobile-phones" },
+        { label: "Phones", href: "/category/phones" },
         { label: "Laptops", href: "/category/laptops" },
-        { label: "Audio", href: "/category/audio" },
-        { label: "Gaming", href: "/category/gaming" },
+        { label: "TVs", href: "/category/tvs" },
+        { label: "Home Appliances", href: "/category/appliances" },
       ],
     },
     {
@@ -45,10 +45,10 @@ export default function Footer() {
           <div className="col-span-2 sm:col-span-1">
             <div className="flex items-center gap-2">
               <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-blue-600 text-sm font-bold text-white">
-                V
+                F
               </span>
               <span className="text-base font-semibold text-slate-900">
-                Volt<span className="text-blue-600">Electronics</span>
+                First<span className="text-blue-600">Stop</span>
               </span>
             </div>
             <p className="mt-3 max-w-xs text-sm text-slate-500">
@@ -79,8 +79,8 @@ export default function Footer() {
         </div>
 
         <div className="mt-10 border-t border-slate-200 pt-6 text-sm text-slate-400">
-          © {new Date().getFullYear()} VoltElectronics. Sample project — not a
-          real store.
+          © {new Date().getFullYear()} FirstStop. Sample project — not a real
+          store.
         </div>
       </div>
     </footer>

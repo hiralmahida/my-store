@@ -15,9 +15,9 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "VoltElectronics — Electronics Store (QAR)",
+  title: "FirstStop — Electronics Store (QAR)",
   description:
-    "A clean, modern electronics store for Qatar. Browse phones, laptops, audio and more.",
+    "Qatar's destination for the latest electronics. Browse phones, laptops, tablets, TVs, appliances and accessories, priced in QAR.",
 };
 
 // The root layout wraps every page. We render the shared Header and Footer here
