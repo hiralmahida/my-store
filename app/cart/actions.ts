@@ -4,6 +4,9 @@
 // that write the session cookie or change cart/wishlist rows — reads live in
 // src/lib/cart.ts. Actions take plain arguments (bound in the calling markup,
 // e.g. `removeFromCart.bind(null, productId)`), so there's no FormData parsing.
+//
+// A cart belongs to a signed-in user (by userId) or a guest (by cookie token);
+// helpers below resolve the right one so add/update/remove work in both cases.
 
 "use server";
 
@@ -12,6 +15,7 @@ import { revalidatePath } from "next/cache";
 import { prisma } from "@/src/lib/prisma";
 import { withDbRetry } from "@/src/lib/db";
 import { CART_SESSION_COOKIE, readSessionToken } from "@/src/lib/cart";
+import { getCurrentUser } from "@/src/lib/auth";
 
 // One year, in seconds — how long a guest's cart/wishlist cookie survives.
 const COOKIE_MAX_AGE = 60 * 60 * 24 * 365;
@@ -44,8 +48,25 @@ async function getOrCreateSessionToken(): Promise<string> {
   return token;
 }
 
-/** Get the guest's cart id, creating the cart row if it doesn't exist yet. */
-async function getOrCreateCartId(token: string): Promise<string> {
+/**
+ * Get the current actor's cart id, creating the cart if needed. Signed-in users
+ * get a user cart (by userId); guests get a cookie-backed cart.
+ */
+async function getOrCreateCartId(): Promise<string> {
+  const user = await getCurrentUser();
+  if (user) {
+    const cart = await withDbRetry(() =>
+      prisma.cart.upsert({
+        where: { userId: user.id },
+        create: { userId: user.id },
+        update: {},
+        select: { id: true },
+      })
+    );
+    return cart.id;
+  }
+
+  const token = await getOrCreateSessionToken();
   const cart = await withDbRetry(() =>
     prisma.cart.upsert({
       where: { sessionToken: token },
@@ -55,6 +76,20 @@ async function getOrCreateCartId(token: string): Promise<string> {
     })
   );
   return cart.id;
+}
+
+/** Resolve the current cart id WITHOUT creating one — for mutating existing lines. */
+async function findCartId(): Promise<string | null> {
+  const user = await getCurrentUser();
+  const where = user
+    ? { userId: user.id }
+    : await readSessionToken().then((t) => (t ? { sessionToken: t } : null));
+  if (!where) return null;
+
+  const cart = await withDbRetry(() =>
+    prisma.cart.findUnique({ where, select: { id: true } })
+  );
+  return cart?.id ?? null;
 }
 
 // --- Cart -------------------------------------------------------------------
@@ -71,8 +106,7 @@ export async function addToCart(productId: string, quantity = 1): Promise<void> 
   );
   if (!product || product.stock <= 0) return; // nothing to add
 
-  const token = await getOrCreateSessionToken();
-  const cartId = await getOrCreateCartId(token);
+  const cartId = await getOrCreateCartId();
 
   // How many are already in the cart, so we don't exceed stock.
   const existing = await withDbRetry(() =>
@@ -102,13 +136,8 @@ export async function setCartItemQuantity(
   productId: string,
   quantity: number
 ): Promise<void> {
-  const token = await readSessionToken();
-  if (!token) return;
-
-  const cart = await withDbRetry(() =>
-    prisma.cart.findUnique({ where: { sessionToken: token }, select: { id: true } })
-  );
-  if (!cart) return;
+  const cartId = await findCartId();
+  if (!cartId) return;
 
   if (quantity <= 0) {
     await removeFromCart(productId);
@@ -122,10 +151,9 @@ export async function setCartItemQuantity(
 
   const clamped = Math.min(Math.floor(quantity), Math.max(product.stock, 1));
 
-  // Update only if the line exists; ignore otherwise.
   await withDbRetry(() =>
     prisma.cartItem.updateMany({
-      where: { cartId: cart.id, productId },
+      where: { cartId, productId },
       data: { quantity: clamped },
     })
   );
@@ -135,19 +163,20 @@ export async function setCartItemQuantity(
 
 /** Remove a product from the cart entirely. */
 export async function removeFromCart(productId: string): Promise<void> {
-  const token = await readSessionToken();
-  if (!token) return;
+  const cartId = await findCartId();
+  if (!cartId) return;
 
   await withDbRetry(() =>
-    prisma.cartItem.deleteMany({
-      where: { productId, cart: { sessionToken: token } },
-    })
+    prisma.cartItem.deleteMany({ where: { cartId, productId } })
   );
 
   revalidateCartUI();
 }
 
 // --- Wishlist ---------------------------------------------------------------
+//
+// The wishlist stays keyed by the guest cookie token (browser-scoped) even when
+// signed in — a deliberate, documented simplification for this phase.
 
 /** Add a product to the wishlist, or remove it if it's already there. */
 export async function toggleWishlist(productId: string): Promise<void> {

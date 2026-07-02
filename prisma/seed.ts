@@ -17,6 +17,7 @@
 import "dotenv/config"; // load DATABASE_URL from .env when run via tsx
 import { PrismaClient } from "../app/generated/prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
+import { hashPassword } from "../src/lib/password";
 
 // Prisma 7 requires a driver adapter (see src/lib/prisma.ts for the full note).
 const connectionString = process.env.DATABASE_URL;
@@ -649,6 +650,11 @@ async function main() {
   //    This makes the seed re-runnable without unique-constraint errors.
   await prisma.orderItem.deleteMany();
   await prisma.order.deleteMany();
+  await prisma.session.deleteMany();
+  await prisma.wishlistItem.deleteMany();
+  await prisma.cartItem.deleteMany();
+  await prisma.cart.deleteMany();
+  await prisma.user.deleteMany();
   await prisma.productImage.deleteMany();
   await prisma.product.deleteMany();
   await prisma.brand.deleteMany();
@@ -692,9 +698,34 @@ async function main() {
     });
   }
 
+  // 4. Create demo accounts (passwords hashed with scrypt — never stored raw).
+  //    These are advertised in the README for trying the app.
+  const demoUsers: {
+    name: string;
+    email: string;
+    password: string;
+    role: "CUSTOMER" | "ADMIN" | "SUPERADMIN";
+  }[] = [
+    { name: "Store Admin", email: "admin@firststop.qa", password: "admin1234", role: "ADMIN" },
+    { name: "Demo Customer", email: "customer@firststop.qa", password: "customer1234", role: "CUSTOMER" },
+  ];
+  for (const u of demoUsers) {
+    await prisma.user.create({
+      data: {
+        name: u.name,
+        email: u.email,
+        role: u.role,
+        passwordHash: await hashPassword(u.password),
+      },
+    });
+  }
+
   console.log(
-    `✅  Seeded ${categories.length} categories, ${brands.length} brands, ${products.length} products.`
+    `✅  Seeded ${categories.length} categories, ${brands.length} brands, ` +
+      `${products.length} products, ${demoUsers.length} demo users.`
   );
+  console.log("   Demo admin:    admin@firststop.qa / admin1234");
+  console.log("   Demo customer: customer@firststop.qa / customer1234");
 }
 
 main()

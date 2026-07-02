@@ -14,6 +14,7 @@
 import Link from "next/link";
 import { getCategories, type CategoryOption } from "@/src/lib/products";
 import { getCartItemCount, getWishlistCount } from "@/src/lib/cart";
+import { getCurrentUser, type CurrentUser } from "@/src/lib/auth";
 
 // Fallback nav shown if the categories query fails (e.g. DB not seeded yet).
 const FALLBACK_CATEGORIES: Pick<CategoryOption, "name" | "slug">[] = [
@@ -35,16 +36,18 @@ export default async function Header() {
     categories = FALLBACK_CATEGORIES;
   }
 
-  // Cart & wishlist badge counts (guarded — badges just hide on error).
+  // Cart & wishlist badge counts + current user (guarded — degrade gracefully).
   let cartCount = 0;
   let wishlistCount = 0;
+  let user: CurrentUser | null = null;
   try {
-    [cartCount, wishlistCount] = await Promise.all([
+    [cartCount, wishlistCount, user] = await Promise.all([
       getCartItemCount(),
       getWishlistCount(),
+      getCurrentUser(),
     ]);
   } catch {
-    // Leave both at 0.
+    // Leave counts at 0 and user as null.
   }
 
   return (
@@ -76,8 +79,28 @@ export default async function Header() {
           />
         </form>
 
-        {/* Wishlist + cart, pushed to the right. */}
+        {/* Account, wishlist, cart — pushed to the right. */}
         <div className="ml-auto flex items-center gap-1 md:ml-0">
+          {user ? (
+            <Link
+              href="/account"
+              className="flex items-center gap-1.5 rounded-full px-2 py-1.5 text-sm font-medium text-slate-700 transition hover:bg-slate-100"
+            >
+              <UserIcon className="h-5 w-5" />
+              <span className="hidden max-w-24 truncate sm:inline">
+                {user.name.split(" ")[0]}
+              </span>
+            </Link>
+          ) : (
+            <Link
+              href="/login"
+              className="flex items-center gap-1.5 rounded-full px-2 py-1.5 text-sm font-medium text-slate-700 transition hover:bg-slate-100"
+            >
+              <UserIcon className="h-5 w-5" />
+              <span className="hidden sm:inline">Sign in</span>
+            </Link>
+          )}
+
           <Link
             href="/wishlist"
             aria-label={`Wishlist${wishlistCount ? `, ${wishlistCount} saved` : ""}`}
@@ -168,6 +191,24 @@ function CartIcon({ className }: { className?: string }) {
       <circle cx="9" cy="21" r="1" />
       <circle cx="20" cy="21" r="1" />
       <path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6" />
+    </svg>
+  );
+}
+
+function UserIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
+      <circle cx="12" cy="7" r="4" />
     </svg>
   );
 }

@@ -114,6 +114,13 @@ model Order {
   createdAt       DateTime    @default(now())
   updatedAt       DateTime    @updatedAt
   items           OrderItem[]
+
+  // Optional link to a registered user (guest checkout leaves this null).
+  // Populated once checkout is built, powering the account order history.
+  userId String?
+  user   User?   @relation(fields: [userId], references: [id])
+
+  @@index([userId])
 }
 
 /// A single line item within an order. `unitPrice` snapshots the product's
@@ -133,18 +140,20 @@ model OrderItem {
 }
 
 // ---------------------------------------------------------------------------
-// Cart & Wishlist (Phase 3)
+// Cart & Wishlist (Phase 3–4)
 //
-// There is no auth yet, so a cart/wishlist belongs to an anonymous guest
-// identified by a random token stored in an httpOnly cookie. When auth arrives,
-// a guest cart can be merged into the signed-in user's cart by copying its
-// items over, then the guest cart is discarded.
+// A cart belongs to EITHER an anonymous guest (identified by `sessionToken`
+// from the cookie) OR a signed-in user (`userId`). On login the guest cart is
+// merged into the user's cart. Both id columns are nullable + unique: Postgres
+// allows many NULLs in a unique column, so guests and users don't collide.
 // ---------------------------------------------------------------------------
 
-/// A guest shopping cart, keyed by the session token from the cookie.
+/// A shopping cart, keyed by a guest session token or a user id.
 model Cart {
   id           String     @id @default(cuid())
-  sessionToken String     @unique // matches the `cart_session` cookie value
+  sessionToken String?    @unique // guest cart: matches the `cart_session` cookie
+  userId       String?    @unique // user cart: set after login
+  user         User?      @relation(fields: [userId], references: [id], onDelete: Cascade)
   items        CartItem[]
   createdAt    DateTime   @default(now())
   updatedAt    DateTime   @updatedAt
@@ -179,4 +188,49 @@ model WishlistItem {
   @@unique([sessionToken, productId])
   @@index([sessionToken])
   @@index([productId])
+}
+
+// ---------------------------------------------------------------------------
+// Users & Authentication (Phase 4)
+//
+// Auth is hand-rolled and dependency-free: passwords are hashed with Node's
+// built-in scrypt (see src/lib/password.ts), and login state is a server-side
+// Session row referenced by an httpOnly cookie (revocable, unlike a bare JWT).
+// ---------------------------------------------------------------------------
+
+/// Access levels. `CUSTOMER` shops; `ADMIN`/`SUPERADMIN` gate the admin panel
+/// (built in a later phase). Role checks live in src/lib/auth.ts.
+enum Role {
+  CUSTOMER
+  ADMIN
+  SUPERADMIN
+}
+
+/// A registered user (customer or staff).
+model User {
+  id           String    @id @default(cuid())
+  email        String    @unique
+  passwordHash String // scrypt: "salt:derivedKey" (never the raw password)
+  name         String
+  role         Role      @default(CUSTOMER)
+  disabled     Boolean   @default(false) // admins can disable an account
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  sessions Session[]
+  cart     Cart?
+  orders   Order[]
+}
+
+/// A login session. The unguessable `token` is stored in the `session` cookie;
+/// deleting the row (or letting it expire) logs the user out everywhere.
+model Session {
+  id        String   @id @default(cuid())
+  token     String   @unique
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([userId])
 }

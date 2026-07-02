@@ -10,6 +10,7 @@ import { cookies } from "next/headers";
 import type { Prisma } from "@/app/generated/prisma/client";
 import { prisma } from "@/src/lib/prisma";
 import { withDbRetry } from "@/src/lib/db";
+import { getCurrentUser } from "@/src/lib/auth";
 
 // The cookie name that ties a browser to its cart/wishlist rows.
 export const CART_SESSION_COOKIE = "cart_session";
@@ -22,6 +23,17 @@ export const DELIVERY_FEE = 0;
 export async function readSessionToken(): Promise<string | null> {
   const store = await cookies();
   return store.get(CART_SESSION_COOKIE)?.value ?? null;
+}
+
+// A cart is owned by EITHER a signed-in user OR a guest cookie. Resolve which,
+// as a unique-where usable by both `cart.findUnique` and relation filters.
+type CartOwner = { userId: string } | { sessionToken: string };
+
+async function currentCartOwner(): Promise<CartOwner | null> {
+  const user = await getCurrentUser();
+  if (user) return { userId: user.id };
+  const token = await readSessionToken();
+  return token ? { sessionToken: token } : null;
 }
 
 // Convert a Prisma Decimal (or number/string) to a JS number for arithmetic.
@@ -66,12 +78,12 @@ const EMPTY_CART: CartSummary = {
  * Returns an empty cart if there's no session cookie yet or the cart is empty.
  */
 export async function getCart(): Promise<CartSummary> {
-  const token = await readSessionToken();
-  if (!token) return EMPTY_CART;
+  const owner = await currentCartOwner();
+  if (!owner) return EMPTY_CART;
 
   const cart = await withDbRetry(() =>
     prisma.cart.findUnique({
-      where: { sessionToken: token },
+      where: owner,
       include: {
         items: {
           include: cartItemInclude,
@@ -104,12 +116,12 @@ export async function getCart(): Promise<CartSummary> {
  * avoids loading every line item.
  */
 export async function getCartItemCount(): Promise<number> {
-  const token = await readSessionToken();
-  if (!token) return 0;
+  const owner = await currentCartOwner();
+  if (!owner) return 0;
 
   const result = await withDbRetry(() =>
     prisma.cartItem.aggregate({
-      where: { cart: { sessionToken: token } },
+      where: { cart: owner },
       _sum: { quantity: true },
     })
   );
@@ -162,4 +174,63 @@ export async function getWishlistCount(): Promise<number> {
   return withDbRetry(() =>
     prisma.wishlistItem.count({ where: { sessionToken: token } })
   );
+}
+
+// --- Login merge ------------------------------------------------------------
+
+/**
+ * On login/registration, fold the guest cart (from the cookie) into the user's
+ * cart: quantities are summed and clamped to stock, then the guest cart is
+ * removed. Ensures the user always has a cart row even if there was no guest
+ * cart. Called from the auth actions.
+ */
+export async function mergeGuestCartIntoUser(userId: string): Promise<void> {
+  const token = await readSessionToken();
+
+  const guest = token
+    ? await withDbRetry(() =>
+        prisma.cart.findUnique({
+          where: { sessionToken: token },
+          include: { items: true },
+        })
+      )
+    : null;
+
+  // Make sure the user has a cart row regardless.
+  const userCart = await withDbRetry(() =>
+    prisma.cart.upsert({
+      where: { userId },
+      create: { userId },
+      update: {},
+      select: { id: true },
+    })
+  );
+
+  if (!guest) return;
+
+  for (const item of guest.items) {
+    const product = await withDbRetry(() =>
+      prisma.product.findUnique({ where: { id: item.productId }, select: { stock: true } })
+    );
+    if (!product || product.stock <= 0) continue;
+
+    const existing = await withDbRetry(() =>
+      prisma.cartItem.findUnique({
+        where: { cartId_productId: { cartId: userCart.id, productId: item.productId } },
+        select: { quantity: true },
+      })
+    );
+    const quantity = Math.min((existing?.quantity ?? 0) + item.quantity, product.stock);
+
+    await withDbRetry(() =>
+      prisma.cartItem.upsert({
+        where: { cartId_productId: { cartId: userCart.id, productId: item.productId } },
+        create: { cartId: userCart.id, productId: item.productId, quantity },
+        update: { quantity },
+      })
+    );
+  }
+
+  // Remove the guest cart (cascades its items).
+  await withDbRetry(() => prisma.cart.delete({ where: { id: guest.id } }));
 }
