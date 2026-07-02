@@ -5,6 +5,49 @@
 import type { Prisma } from "@/app/generated/prisma/client";
 import { prisma } from "@/src/lib/prisma";
 
+// --- Cold-start resilience --------------------------------------------------
+//
+// On a serverless Postgres like Neon's free tier, the database sleeps after
+// being idle and can take several seconds to wake. The first query (or the
+// start of a `$transaction`) can then fail with a transient error — most often
+// P2028 ("Unable to start a transaction in the given time") or a connection
+// error — before the instance is ready. Retrying briefly lets that first
+// request succeed once the database is awake.
+
+// Prisma error codes worth retrying on a cold start. Auth errors (P1000) are
+// deliberately excluded — bad credentials will never succeed on retry.
+const RETRYABLE_DB_CODES = new Set(["P2028", "P1001", "P1002", "P1008", "P1017"]);
+
+function isRetryableDbError(error: unknown): boolean {
+  const code = (error as { code?: unknown })?.code;
+  if (typeof code === "string" && RETRYABLE_DB_CODES.has(code)) return true;
+  const message = error instanceof Error ? error.message : String(error);
+  return /unable to start a transaction|can't reach database|timed out|connection|econnreset|terminating connection/i.test(
+    message
+  );
+}
+
+/**
+ * Run a database operation, retrying a few times with exponential backoff if it
+ * fails with a transient cold-start error. Non-retryable errors (and the final
+ * attempt) are re-thrown unchanged, so real problems still surface.
+ */
+async function withDbRetry<T>(operation: () => Promise<T>, attempts = 4): Promise<T> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    try {
+      return await operation();
+    } catch (error) {
+      lastError = error;
+      if (attempt === attempts - 1 || !isRetryableDbError(error)) break;
+      // Backoff: 500ms, 1000ms, 2000ms — giving a sleeping DB time to wake.
+      const delay = 500 * 2 ** attempt;
+      await new Promise((resolve) => setTimeout(resolve, delay));
+    }
+  }
+  throw lastError;
+}
+
 // The exact related data a product *card* needs: its brand name and one image.
 // Declaring it `satisfies Prisma.ProductInclude` gives us type-checking here and
 // lets us derive the card's row type from it below, so the type can never drift
@@ -26,12 +69,14 @@ export type FeaturedProduct = ProductCardData;
  * data to render a card.
  */
 export async function getFeaturedProducts(limit = 8): Promise<ProductCardData[]> {
-  return prisma.product.findMany({
-    where: { featured: true },
-    include: cardInclude,
-    orderBy: { createdAt: "desc" },
-    take: limit,
-  });
+  return withDbRetry(() =>
+    prisma.product.findMany({
+      where: { featured: true },
+      include: cardInclude,
+      orderBy: { createdAt: "desc" },
+      take: limit,
+    })
+  );
 }
 
 // --- Listing with filters, sorting, and pagination -------------------------
@@ -121,16 +166,22 @@ export async function listProducts(filters: ProductFilters = {}): Promise<Produc
   const sort = filters.sort ?? "newest";
 
   // Run the page query and the total count together in one round-trip.
-  const [products, total] = await prisma.$transaction([
-    prisma.product.findMany({
-      where,
-      include: cardInclude,
-      orderBy: orderByFor(sort),
-      skip: (page - 1) * perPage,
-      take: perPage,
-    }),
-    prisma.product.count({ where }),
-  ]);
+  // Generous maxWait/timeout + retry keep this resilient to a cold Neon start.
+  const [products, total] = await withDbRetry(() =>
+    prisma.$transaction(
+      [
+        prisma.product.findMany({
+          where,
+          include: cardInclude,
+          orderBy: orderByFor(sort),
+          skip: (page - 1) * perPage,
+          take: perPage,
+        }),
+        prisma.product.count({ where }),
+      ],
+      { maxWait: 15000, timeout: 20000 }
+    )
+  );
 
   return {
     products,
@@ -154,10 +205,12 @@ export type ProductDetail = Prisma.ProductGetPayload<{ include: typeof detailInc
 
 /** Fetch one product by its URL slug, or `null` if it doesn't exist. */
 export async function getProductBySlug(slug: string): Promise<ProductDetail | null> {
-  return prisma.product.findUnique({
-    where: { slug },
-    include: detailInclude,
-  });
+  return withDbRetry(() =>
+    prisma.product.findUnique({
+      where: { slug },
+      include: detailInclude,
+    })
+  );
 }
 
 /**
@@ -168,15 +221,17 @@ export async function getRelatedProducts(
   product: Pick<ProductDetail, "id" | "categoryId">,
   limit = 4
 ): Promise<ProductCardData[]> {
-  return prisma.product.findMany({
-    where: {
-      categoryId: product.categoryId,
-      id: { not: product.id },
-    },
-    include: cardInclude,
-    orderBy: { createdAt: "desc" },
-    take: limit,
-  });
+  return withDbRetry(() =>
+    prisma.product.findMany({
+      where: {
+        categoryId: product.categoryId,
+        id: { not: product.id },
+      },
+      include: cardInclude,
+      orderBy: { createdAt: "desc" },
+      take: limit,
+    })
+  );
 }
 
 // --- Categories & brands (for nav and filter controls) ---------------------
@@ -185,26 +240,32 @@ export type CategoryOption = { id: string; name: string; slug: string; image: st
 
 /** All categories, alphabetical — used by the nav and category filters. */
 export async function getCategories(): Promise<CategoryOption[]> {
-  return prisma.category.findMany({
-    select: { id: true, name: true, slug: true, image: true },
-    orderBy: { name: "asc" },
-  });
+  return withDbRetry(() =>
+    prisma.category.findMany({
+      select: { id: true, name: true, slug: true, image: true },
+      orderBy: { name: "asc" },
+    })
+  );
 }
 
 /** Look up a single category by slug (for category landing pages). */
 export async function getCategoryBySlug(slug: string): Promise<CategoryOption | null> {
-  return prisma.category.findUnique({
-    where: { slug },
-    select: { id: true, name: true, slug: true, image: true },
-  });
+  return withDbRetry(() =>
+    prisma.category.findUnique({
+      where: { slug },
+      select: { id: true, name: true, slug: true, image: true },
+    })
+  );
 }
 
 export type BrandOption = { id: string; name: string; slug: string };
 
 /** All brands, alphabetical — used by the brand filter checkboxes. */
 export async function getBrands(): Promise<BrandOption[]> {
-  return prisma.brand.findMany({
-    select: { id: true, name: true, slug: true },
-    orderBy: { name: "asc" },
-  });
+  return withDbRetry(() =>
+    prisma.brand.findMany({
+      select: { id: true, name: true, slug: true },
+      orderBy: { name: "asc" },
+    })
+  );
 }
