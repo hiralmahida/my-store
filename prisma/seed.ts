@@ -35,13 +35,97 @@ function placeholder(label: string, angle: string, bg = "0f172a"): string {
   return `https://placehold.co/800x800/${bg}/e2e8f0?text=${text}`;
 }
 
-// Produce the 3 gallery images every product gets: front / side / back.
-function galleryFor(name: string) {
-  return [
-    { url: placeholder(name, "Front", "0f172a"), alt: `${name} — front view` },
-    { url: placeholder(name, "Side", "1e293b"), alt: `${name} — side view` },
-    { url: placeholder(name, "Back", "334155"), alt: `${name} — back view` },
-  ];
+// Real product photos, sourced from Wikimedia Commons (freely licensed, served
+// from the stable upload.wikimedia.org CDN — hotlink-friendly). Where an exact
+// model photo isn't available we reuse a real photo from the same product
+// family. Any product without a mapping falls back to a generated placeholder,
+// and the UI also swaps to a placeholder if an image ever fails to load.
+const IMG = {
+  iphone15pro: "https://upload.wikimedia.org/wikipedia/commons/thumb/1/19/Apple_iPhone_15_Pro.jpg/960px-Apple_iPhone_15_Pro.jpg",
+  iphone14: "https://upload.wikimedia.org/wikipedia/commons/thumb/3/37/Back_of_the_iPhone_14_Pro.jpg/960px-Back_of_the_iPhone_14_Pro.jpg",
+  galaxyS: "https://upload.wikimedia.org/wikipedia/commons/thumb/4/46/Samsung_Galaxy_S24_%28webtekno%29_008.png/960px-Samsung_Galaxy_S24_%28webtekno%29_008.png",
+  galaxyA: "https://upload.wikimedia.org/wikipedia/commons/thumb/9/95/Back_of_the_Samsung_Galaxy_A54_5G.jpg/960px-Back_of_the_Samsung_Galaxy_A54_5G.jpg",
+  pixel: "https://upload.wikimedia.org/wikipedia/commons/thumb/4/4b/Google_Pixel_8_Rose_rear.jpg/960px-Google_Pixel_8_Rose_rear.jpg",
+  xperia: "https://upload.wikimedia.org/wikipedia/commons/f/fd/Sony_Xperia_1.png",
+  macbookAir: "https://upload.wikimedia.org/wikipedia/commons/thumb/0/0f/MacBook_Air_black.jpg/960px-MacBook_Air_black.jpg",
+  macbookPro: "https://upload.wikimedia.org/wikipedia/commons/thumb/c/c4/Apple_MacBook_Pro_15%22_%282017%29.jpg/960px-Apple_MacBook_Pro_15%22_%282017%29.jpg",
+  dellXps: "https://upload.wikimedia.org/wikipedia/commons/thumb/9/91/Dell_XPS_L401X.JPG/960px-Dell_XPS_L401X.JPG",
+  laptop: "https://upload.wikimedia.org/wikipedia/commons/thumb/0/0e/IBM_Thinkpad_R51.jpg/960px-IBM_Thinkpad_R51.jpg",
+  zenbook: "https://upload.wikimedia.org/wikipedia/commons/thumb/9/96/Asus_Zenbook_UX32V-8995.jpg/960px-Asus_Zenbook_UX32V-8995.jpg",
+  ipad: "https://upload.wikimedia.org/wikipedia/commons/thumb/a/a6/IPad_Pro.jpg/960px-IPad_Pro.jpg",
+  galaxyTab: "https://upload.wikimedia.org/wikipedia/commons/thumb/f/fd/Samsung_Galaxy_Tab_7.0.jpeg/960px-Samsung_Galaxy_Tab_7.0.jpeg",
+  surface: "https://upload.wikimedia.org/wikipedia/commons/thumb/5/5a/Microsoft_Surface_Pro_4.png/960px-Microsoft_Surface_Pro_4.png",
+  oledTv: "https://upload.wikimedia.org/wikipedia/commons/thumb/7/7f/LG%EC%A0%84%EC%9E%90%2C_%EA%B9%9C%EB%B9%A1%EC%9E%84_%EC%97%86%EB%8A%94_55%EC%9D%B8%EC%B9%98_3D_OLED_TV_%EA%B3%B5%EA%B0%9C.jpg/960px-LG%EC%A0%84%EC%9E%90%2C_%EA%B9%9C%EB%B9%A1%EC%9E%84_%EC%97%86%EB%8A%94_55%EC%9D%B8%EC%B9%98_3D_OLED_TV_%EA%B3%B5%EA%B0%9C.jpg",
+  ledTv: "https://upload.wikimedia.org/wikipedia/commons/thumb/0/02/Techwood_flat_screen_television_from_2010.jpg/960px-Techwood_flat_screen_television_from_2010.jpg",
+  sonyTv: "https://upload.wikimedia.org/wikipedia/commons/thumb/f/fe/Sony_kdl_46x2000_bravia_display_dreambox_dm7000_receiver_by_hdtvtotal_dot_com.jpg/960px-Sony_kdl_46x2000_bravia_display_dreambox_dm7000_receiver_by_hdtvtotal_dot_com.jpg",
+  washer: "https://upload.wikimedia.org/wikipedia/commons/thumb/9/98/Open_top-loading_washing_machine.jpg/960px-Open_top-loading_washing_machine.jpg",
+  fridge: "https://upload.wikimedia.org/wikipedia/commons/thumb/8/85/LG_refrigerator_interior.jpg/960px-LG_refrigerator_interior.jpg",
+  vacuum: "https://upload.wikimedia.org/wikipedia/commons/thumb/9/9e/Dyson_Cordless_Vacuum_%2843141478761%29.jpg/960px-Dyson_Cordless_Vacuum_%2843141478761%29.jpg",
+  purifier: "https://upload.wikimedia.org/wikipedia/commons/thumb/f/f5/Air_Purifier_%28Levoit_LV-H133%29_%2849318569587%29.jpg/960px-Air_Purifier_%28Levoit_LV-H133%29_%2849318569587%29.jpg",
+  microwave: "https://upload.wikimedia.org/wikipedia/commons/1/12/Microwave_oven_flashon.jpg",
+  airpods: "https://upload.wikimedia.org/wikipedia/commons/thumb/4/4c/AirPods_Pro_case.jpg/960px-AirPods_Pro_case.jpg",
+  appleWatch: "https://upload.wikimedia.org/wikipedia/commons/thumb/9/92/Apple_Watch-.jpg/960px-Apple_Watch-.jpg",
+  galaxyWatch: "https://upload.wikimedia.org/wikipedia/commons/thumb/0/0f/SAMSUNG_Galaxy_Watch_%282%29.jpg/960px-SAMSUNG_Galaxy_Watch_%282%29.jpg",
+  headphones: "https://upload.wikimedia.org/wikipedia/commons/thumb/4/40/Headphones_1.jpg/960px-Headphones_1.jpg",
+  speaker: "https://upload.wikimedia.org/wikipedia/commons/thumb/3/3e/Bose_Bluetooth_Speaker.jpg/960px-Bose_Bluetooth_Speaker.jpg",
+  powerbank: "https://upload.wikimedia.org/wikipedia/commons/thumb/7/75/Portable_power_bank.jpg/960px-Portable_power_bank.jpg",
+  charger: "https://upload.wikimedia.org/wikipedia/commons/6/6a/USB_wall_charger.JPG",
+  mouse: "https://upload.wikimedia.org/wikipedia/commons/thumb/2/23/Logitech_corded_mouse_m500_imgp1410_smial_wp.jpg/960px-Logitech_corded_mouse_m500_imgp1410_smial_wp.jpg",
+  keyboard: "https://upload.wikimedia.org/wikipedia/commons/thumb/d/dc/Rii_RT-MWK01_mini_wireless_keyboard_HS1.jpg/960px-Rii_RT-MWK01_mini_wireless_keyboard_HS1.jpg",
+} as const;
+
+// Map each product slug to its photo.
+const PRODUCT_IMAGE: Record<string, string> = {
+  "apple-iphone-15-pro-256gb": IMG.iphone15pro,
+  "apple-iphone-15-128gb": IMG.iphone15pro,
+  "apple-iphone-14-128gb": IMG.iphone14,
+  "samsung-galaxy-s24-ultra-512gb": IMG.galaxyS,
+  "samsung-galaxy-s24-256gb": IMG.galaxyS,
+  "samsung-galaxy-a55-128gb": IMG.galaxyA,
+  "google-pixel-8-pro-256gb": IMG.pixel,
+  "sony-xperia-1-vi-256gb": IMG.xperia,
+  "apple-macbook-air-13-m3-256gb": IMG.macbookAir,
+  "apple-macbook-pro-14-m3-pro": IMG.macbookPro,
+  "dell-xps-13-plus": IMG.dellXps,
+  "hp-spectre-x360-14": IMG.laptop,
+  "hp-pavilion-15": IMG.laptop,
+  "lenovo-thinkpad-x1-carbon-gen-12": IMG.laptop,
+  "lenovo-yoga-slim-7": IMG.zenbook,
+  "asus-zenbook-14-oled": IMG.zenbook,
+  "apple-ipad-pro-11-m4-256gb": IMG.ipad,
+  "apple-ipad-air-11-m2-128gb": IMG.ipad,
+  "apple-ipad-10th-gen-64gb": IMG.ipad,
+  "samsung-galaxy-tab-s9-256gb": IMG.galaxyTab,
+  "lenovo-tab-p12": IMG.galaxyTab,
+  "microsoft-surface-pro-11": IMG.surface,
+  "samsung-65-neo-qled-4k-qn90d": IMG.ledTv,
+  "samsung-55-crystal-uhd-du8000": IMG.ledTv,
+  "samsung-75-crystal-uhd-du7000": IMG.ledTv,
+  "lg-65-oled-evo-c4": IMG.oledTv,
+  "lg-55-uhd-ur8050": IMG.ledTv,
+  "sony-65-bravia-7-mini-led": IMG.sonyTv,
+  "sony-55-bravia-3-4k": IMG.sonyTv,
+  "lg-8kg-front-load-washing-machine": IMG.washer,
+  "samsung-9kg-washer-dryer-combo": IMG.washer,
+  "lg-471l-french-door-refrigerator": IMG.fridge,
+  "samsung-680l-side-by-side-refrigerator": IMG.fridge,
+  "dyson-v15-detect-cordless-vacuum": IMG.vacuum,
+  "dyson-purifier-hot-cool": IMG.purifier,
+  "samsung-40l-convection-microwave-oven": IMG.microwave,
+  "apple-airpods-pro-2nd-gen-usb-c": IMG.airpods,
+  "apple-watch-series-10-46mm-gps": IMG.appleWatch,
+  "samsung-galaxy-watch-7-44mm": IMG.galaxyWatch,
+  "sony-wh-1000xm5-wireless-headphones": IMG.headphones,
+  "bose-soundlink-flex-bluetooth-speaker": IMG.speaker,
+  "anker-737-power-bank-24000mah": IMG.powerbank,
+  "anker-100w-gan-charger": IMG.charger,
+  "logitech-mx-master-3s-mouse": IMG.mouse,
+  "logitech-mx-keys-s-keyboard": IMG.keyboard,
+};
+
+// One real image per product, with a generated placeholder as a safety net.
+function imageFor(slug: string, name: string) {
+  return [{ url: PRODUCT_IMAGE[slug] ?? placeholder(name, "", "0f172a"), alt: name }];
 }
 
 // --- Static seed data ------------------------------------------------------
@@ -693,7 +777,7 @@ async function main() {
         specs: p.specs,
         categoryId,
         brandId,
-        images: { create: galleryFor(p.name) },
+        images: { create: imageFor(p.slug, p.name) },
       },
     });
   }

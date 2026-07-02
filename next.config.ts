@@ -9,6 +9,11 @@ const nextConfig: NextConfig = {
         protocol: "https",
         hostname: "placehold.co",
       },
+      {
+        // Real product photos (seed data) are served from Wikimedia Commons.
+        protocol: "https",
+        hostname: "upload.wikimedia.org",
+      },
     ],
   },
 };

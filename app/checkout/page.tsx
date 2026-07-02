@@ -6,8 +6,8 @@
 
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
-import Image from "next/image";
 import Link from "next/link";
+import SafeImage from "@/app/components/SafeImage";
 import CheckoutForm from "@/app/components/CheckoutForm";
 import { getCart } from "@/src/lib/cart";
 import { getCurrentUser } from "@/src/lib/auth";
@@ -52,7 +52,7 @@ export default async function CheckoutPage() {
               return (
                 <li key={item.id} className="flex gap-3">
                   <div className="relative h-14 w-14 shrink-0 overflow-hidden rounded-lg border border-slate-200 bg-slate-50">
-                    <Image
+                    <SafeImage
                       src={image?.url ?? FALLBACK_IMAGE}
                       alt={image?.alt ?? item.product.name}
                       fill

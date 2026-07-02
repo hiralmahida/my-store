@@ -8,7 +8,7 @@
 "use client";
 
 import { useState } from "react";
-import Image from "next/image";
+import SafeImage from "./SafeImage";
 
 type GalleryImage = { url: string; alt: string | null };
 
@@ -32,7 +32,7 @@ export default function ProductGallery({
     <div>
       {/* Main image */}
       <div className="relative aspect-square overflow-hidden rounded-2xl border border-slate-200 bg-slate-50">
-        <Image
+        <SafeImage
           src={current.url}
           alt={current.alt ?? name}
           fill
@@ -58,7 +58,7 @@ export default function ProductGallery({
                   : "border-slate-200 hover:border-slate-300"
               }`}
             >
-              <Image
+              <SafeImage
                 src={image.url}
                 alt={image.alt ?? `${name} thumbnail ${index + 1}`}
                 fill

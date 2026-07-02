@@ -6,8 +6,8 @@
 // from getCart().
 
 import type { Metadata } from "next";
-import Image from "next/image";
 import Link from "next/link";
+import SafeImage from "@/app/components/SafeImage";
 import { getCart } from "@/src/lib/cart";
 import { setCartItemQuantity, removeFromCart } from "@/app/cart/actions";
 import { formatQAR } from "@/src/lib/format";
@@ -69,7 +69,7 @@ export default async function CartPage() {
                   href={`/product/${item.product.slug}`}
                   className="relative h-24 w-24 shrink-0 overflow-hidden rounded-lg border border-slate-200 bg-slate-50"
                 >
-                  <Image
+                  <SafeImage
                     src={image?.url ?? FALLBACK_IMAGE}
                     alt={image?.alt ?? item.product.name}
                     fill

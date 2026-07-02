@@ -1,11 +1,11 @@
 // A single product card used in the homepage grid.
 // Server Component: it just renders data, so no "use client" is needed.
 
-import Image from "next/image";
 import Link from "next/link";
 import type { FeaturedProduct } from "@/src/lib/products";
 import { formatQAR } from "@/src/lib/format";
 import QuickAddButton from "./QuickAddButton";
+import SafeImage from "./SafeImage";
 
 export default function ProductCard({ product }: { product: FeaturedProduct }) {
   // Use the first image if the product has one; otherwise fall back to a
@@ -23,7 +23,7 @@ export default function ProductCard({ product }: { product: FeaturedProduct }) {
       <Link href={`/product/${product.slug}`} prefetch className="flex flex-1 flex-col">
         {/* Image area with a fixed square aspect ratio for a tidy grid. */}
         <div className="relative aspect-square overflow-hidden bg-slate-50">
-          <Image
+          <SafeImage
             src={imageUrl}
             alt={imageAlt}
             fill
