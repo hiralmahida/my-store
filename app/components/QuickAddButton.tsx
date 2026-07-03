@@ -30,7 +30,7 @@ export default function QuickAddButton({
   if (disabled) {
     return (
       <span
-        className="absolute bottom-3 left-3 z-10 flex h-9 w-9 items-center justify-center rounded-full bg-slate-100 text-slate-300"
+        className="absolute bottom-3 right-3 z-10 flex h-9 w-9 items-center justify-center rounded-full bg-slate-100 text-slate-300"
         title="Out of stock"
         aria-label="Out of stock"
       >
@@ -56,7 +56,7 @@ export default function QuickAddButton({
       disabled={pending}
       aria-label="Add to cart"
       title="Add to cart"
-      className={`absolute bottom-3 left-3 z-10 flex h-9 w-9 items-center justify-center rounded-full shadow-sm transition disabled:opacity-70 ${
+      className={`absolute bottom-3 right-3 z-10 flex h-9 w-9 items-center justify-center rounded-full shadow-sm transition disabled:opacity-70 ${
         added ? "bg-green-600 text-white" : "bg-blue-600 text-white hover:bg-blue-700"
       }`}
     >

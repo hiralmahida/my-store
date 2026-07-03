@@ -112,12 +112,16 @@ export async function listProducts(filters: ProductFilters = {}): Promise<Produc
     if (filters.maxPrice != null) where.price.lte = filters.maxPrice;
   }
 
-  // Free-text search across name and description (case-insensitive).
+  // Free-text search across product name, description, brand and category
+  // (all partial + case-insensitive), so "iphone", "apple" and "phones" all
+  // return the expected products.
   if (filters.search && filters.search.trim()) {
     const q = filters.search.trim();
     where.OR = [
       { name: { contains: q, mode: "insensitive" } },
       { description: { contains: q, mode: "insensitive" } },
+      { brand: { name: { contains: q, mode: "insensitive" } } },
+      { category: { name: { contains: q, mode: "insensitive" } } },
     ];
   }
 

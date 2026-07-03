@@ -64,12 +64,20 @@ export default async function Header() {
           </span>
         </Link>
 
-        {/* Search — submits to /search via GET, so it works without JS. */}
+        {/* Search — submits to /search via GET, so it works without JS. The
+            magnifier is a real submit button, so clicking it or pressing Enter
+            both run the search. */}
         <form
           action="/search"
           className="relative hidden flex-1 items-center md:flex"
         >
-          <SearchIcon className="pointer-events-none absolute left-3 h-5 w-5 text-slate-400" />
+          <button
+            type="submit"
+            aria-label="Search"
+            className="absolute left-1 flex h-8 w-8 items-center justify-center rounded-full text-slate-400 transition hover:text-slate-600"
+          >
+            <SearchIcon className="h-5 w-5" />
+          </button>
           <input
             type="search"
             name="q"
