@@ -40,8 +40,8 @@ export async function getAdminStats(): Promise<AdminStats> {
           _sum: { total: true },
           where: { createdAt: { gte: since }, status: { in: [...REVENUE_STATUSES] } },
         }),
-        prisma.product.count(),
-        prisma.product.count({ where: { stock: { lte: LOW_STOCK_THRESHOLD } } }),
+        prisma.product.count({ where: { deletedAt: null } }),
+        prisma.product.count({ where: { stock: { lte: LOW_STOCK_THRESHOLD }, deletedAt: null } }),
         prisma.user.count({ where: { role: "CUSTOMER" } }),
       ])
     );
@@ -129,6 +129,7 @@ export type AdminProductRow = Prisma.ProductGetPayload<{
 export async function listAdminProducts(): Promise<AdminProductRow[]> {
   return withDbRetry(() =>
     prisma.product.findMany({
+      where: { deletedAt: null }, // hide soft-deleted products from the admin list
       include: { brand: true, category: true },
       orderBy: { createdAt: "desc" },
     })
@@ -164,7 +165,7 @@ export async function listAdminOrders(status?: string): Promise<AdminOrderRow[]>
       where,
       include: { payment: true, _count: { select: { items: true } } },
       orderBy: { createdAt: "desc" },
-      take: 100,
+      take: 500, // high cap so placed orders are never hidden from admin
     })
   );
 }

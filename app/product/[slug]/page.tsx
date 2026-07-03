@@ -7,7 +7,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import ProductGallery from "@/app/components/ProductGallery";
-import AddToCartButton from "@/app/components/AddToCartButton";
+import QuantityAddToCart from "@/app/components/QuantityAddToCart";
 import WishlistButton from "@/app/components/WishlistButton";
 import LiveStock from "@/app/components/LiveStock";
 import ProductGrid from "@/app/components/ProductGrid";
@@ -122,16 +122,10 @@ export default async function ProductPage({
           </div>
 
           {/* CTA */}
-          <div className="mt-6 max-w-sm">
-            <div className="flex gap-3">
-              <div className="flex-1">
-                <AddToCartButton productId={product.id} disabled={stock === 0} />
-              </div>
-              <div className="w-32">
-                <WishlistButton productId={product.id} initialWishlisted={wishlisted} />
-              </div>
-            </div>
-            <p className="mt-3 flex items-center gap-1.5 text-sm text-slate-500">
+          <div className="mt-6 max-w-sm space-y-3">
+            <QuantityAddToCart productId={product.id} stock={stock} />
+            <WishlistButton productId={product.id} initialWishlisted={wishlisted} />
+            <p className="flex items-center gap-1.5 text-sm text-slate-500">
               <TruckIcon className="h-4 w-4" />
               Free local delivery across Qatar
             </p>

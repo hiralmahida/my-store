@@ -61,6 +61,10 @@ model Product {
   featured    Boolean  @default(false) // show on the homepage grid
   specs       Json     @default("{}") // flexible key/value tech specs
   createdAt   DateTime @default(now())
+  // Soft delete: set when a product referenced by past orders is "deleted".
+  // Such rows are hidden from the storefront and admin list but kept so
+  // historical order line items still resolve their product.
+  deletedAt   DateTime?
 
   // Each product belongs to one category and one brand.
   categoryId String
@@ -76,6 +80,7 @@ model Product {
 
   @@index([categoryId])
   @@index([brandId])
+  @@index([deletedAt])
 }
 
 /// An image belonging to a product. A product can have several.

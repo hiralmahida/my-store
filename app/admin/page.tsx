@@ -66,22 +66,38 @@ export default async function AdminDashboard() {
             <h2 className="mb-4 text-sm font-semibold text-slate-900">
               Revenue — last 7 days
             </h2>
-            <div className="flex h-40 items-end gap-2">
-              {revenue.map((day) => (
-                <div key={day.date} className="flex flex-1 flex-col items-center gap-2">
-                  <div className="flex w-full flex-1 items-end">
-                    <div
-                      className="w-full rounded-t bg-blue-500/80"
-                      style={{ height: `${(day.revenue / maxRevenue) * 100}%` }}
-                      title={formatQAR(day.revenue)}
-                    />
-                  </div>
-                  <span className="text-[10px] text-slate-400">
-                    {new Date(day.date).toLocaleDateString("en-GB", { weekday: "short" })}
-                  </span>
+            {revenue.every((d) => d.revenue === 0) ? (
+              <p className="flex h-40 items-center justify-center rounded-lg bg-slate-50 text-sm text-slate-400">
+                No revenue in the last 7 days yet.
+              </p>
+            ) : (
+              <>
+                {/* Bar track: a fixed-height row so each bar's % height resolves
+                    against a definite height (the earlier bug was a % height
+                    inside a flex column with no definite height → collapsed). */}
+                <div className="flex h-40 items-end gap-2">
+                  {revenue.map((day) => {
+                    const pct = (day.revenue / maxRevenue) * 100;
+                    return (
+                      <div key={day.date} className="flex h-full flex-1 items-end">
+                        <div
+                          className="w-full rounded-t bg-blue-500/80"
+                          style={{ height: `${day.revenue > 0 ? Math.max(pct, 3) : 0}%` }}
+                          title={formatQAR(day.revenue)}
+                        />
+                      </div>
+                    );
+                  })}
                 </div>
-              ))}
-            </div>
+                <div className="mt-2 flex gap-2">
+                  {revenue.map((day) => (
+                    <div key={day.date} className="flex-1 text-center text-[10px] text-slate-400">
+                      {new Date(day.date).toLocaleDateString("en-GB", { weekday: "short" })}
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
           </section>
 
           <section className="rounded-2xl border border-slate-200 bg-white p-6">

@@ -13,8 +13,20 @@ export const metadata: Metadata = {
   description: "Create a FirstStop account to check out faster and track orders.",
 };
 
-export default async function RegisterPage() {
-  if (await getCurrentUser()) redirect("/account");
+function sanitize(next?: string): string | undefined {
+  return next && next.startsWith("/") && !next.startsWith("//") ? next : undefined;
+}
+
+export default async function RegisterPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ next?: string }>;
+}) {
+  const next = sanitize((await searchParams).next);
+
+  if (await getCurrentUser()) redirect(next ?? "/account");
+
+  const loginHref = next ? `/login?next=${encodeURIComponent(next)}` : "/login";
 
   return (
     <div className="mx-auto max-w-md px-4 py-16 sm:px-6">
@@ -26,12 +38,12 @@ export default async function RegisterPage() {
       </p>
 
       <div className="mt-8 rounded-2xl border border-slate-200 p-6">
-        <RegisterForm />
+        <RegisterForm next={next} />
       </div>
 
       <p className="mt-6 text-center text-sm text-slate-500">
         Already have an account?{" "}
-        <Link href="/login" className="font-medium text-blue-600 hover:underline">
+        <Link href={loginHref} className="font-medium text-blue-600 hover:underline">
           Sign in
         </Link>
       </p>

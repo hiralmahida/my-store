@@ -29,7 +29,7 @@ export type FeaturedProduct = ProductCardData;
 export async function getFeaturedProducts(limit = 8): Promise<ProductCardData[]> {
   return withDbRetry(() =>
     prisma.product.findMany({
-      where: { featured: true },
+      where: { featured: true, deletedAt: null },
       include: cardInclude,
       orderBy: { createdAt: "desc" },
       take: limit,
@@ -90,8 +90,9 @@ export async function listProducts(filters: ProductFilters = {}): Promise<Produc
   const page = Math.max(1, Math.floor(filters.page ?? 1));
   const perPage = Math.min(48, Math.max(1, Math.floor(filters.perPage ?? 12)));
 
-  // Build the WHERE clause from whichever filters are present.
-  const where: Prisma.ProductWhereInput = {};
+  // Build the WHERE clause from whichever filters are present. Soft-deleted
+  // products are always excluded from the storefront.
+  const where: Prisma.ProductWhereInput = { deletedAt: null };
 
   if (filters.categorySlug) {
     where.category = { slug: filters.categorySlug };
@@ -168,8 +169,8 @@ export type ProductDetail = Prisma.ProductGetPayload<{ include: typeof detailInc
 /** Fetch one product by its URL slug, or `null` if it doesn't exist. */
 export async function getProductBySlug(slug: string): Promise<ProductDetail | null> {
   return withDbRetry(() =>
-    prisma.product.findUnique({
-      where: { slug },
+    prisma.product.findFirst({
+      where: { slug, deletedAt: null },
       include: detailInclude,
     })
   );
@@ -188,6 +189,7 @@ export async function getRelatedProducts(
       where: {
         categoryId: product.categoryId,
         id: { not: product.id },
+        deletedAt: null,
       },
       include: cardInclude,
       orderBy: { createdAt: "desc" },

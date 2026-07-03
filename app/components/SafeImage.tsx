@@ -29,6 +29,12 @@ export default function SafeImage({
   return (
     <Image
       {...rest}
+      // Load remote product images directly in the browser rather than through
+      // the Next image optimizer. The optimizer can intermittently fail to fetch
+      // from some remote hosts (rate limits / UA blocks), which showed up as
+      // blank images; the browser fetches these hosts reliably. onError still
+      // swaps to a placeholder if a specific URL is unreachable.
+      unoptimized
       src={errored ? fallbackSrc : src}
       alt={alt}
       onError={() => setErrored(true)}

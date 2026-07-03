@@ -15,6 +15,15 @@ export const metadata: Metadata = { title: "Order — FirstStop Admin" };
 
 const STATUSES = ["PENDING", "PAID", "SHIPPED", "DELIVERED", "CANCELLED", "REFUNDED"];
 
+const STATUS_STYLES: Record<string, string> = {
+  PENDING: "bg-amber-100 text-amber-800",
+  PAID: "bg-blue-100 text-blue-800",
+  SHIPPED: "bg-indigo-100 text-indigo-800",
+  DELIVERED: "bg-green-100 text-green-800",
+  CANCELLED: "bg-rose-100 text-rose-700",
+  REFUNDED: "bg-slate-200 text-slate-700",
+};
+
 export default async function AdminOrderDetailPage({
   params,
 }: {
@@ -74,8 +83,21 @@ export default async function AdminOrderDetailPage({
         <div className="space-y-4">
           <section className="rounded-2xl border border-slate-200 bg-white p-5">
             <h2 className="mb-3 text-sm font-semibold text-slate-900">Status</h2>
+            <p className="mb-3">
+              Current:{" "}
+              <span
+                className={`ml-1 inline-flex rounded-full px-2.5 py-0.5 text-xs font-semibold ${
+                  STATUS_STYLES[order.status] ?? "bg-slate-100 text-slate-700"
+                }`}
+              >
+                {order.status}
+              </span>
+            </p>
             <form action={updateOrderStatus.bind(null, order.id)} className="flex gap-2">
+              {/* key resets the uncontrolled select to the current status after
+                  each update, so it reflects the saved value. */}
               <select
+                key={order.status}
                 name="status"
                 defaultValue={order.status}
                 className="flex-1 rounded-lg border border-slate-200 px-2 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"

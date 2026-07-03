@@ -31,6 +31,14 @@ export async function placeOrder(
   _prev: CheckoutState,
   formData: FormData
 ): Promise<CheckoutState> {
+  // Placing an order requires a signed-in, active account. getCurrentUser
+  // returns null for guests AND for disabled accounts, so this single check
+  // blocks both — server-side, not just in the UI.
+  const user = await getCurrentUser();
+  if (!user) {
+    return { error: "Please sign in to place your order." };
+  }
+
   const cart = await getCart();
   if (cart.items.length === 0) {
     return { error: "Your cart is empty." };
@@ -85,7 +93,6 @@ export async function placeOrder(
   }
 
   // --- Persist the order atomically ---
-  const user = await getCurrentUser();
   const cartId = await getActiveCartId();
   const shippingAddress = `${address}, ${city}, Qatar`;
 
@@ -94,7 +101,7 @@ export async function placeOrder(
       async (tx) => {
         const created = await tx.order.create({
           data: {
-            userId: user?.id ?? null,
+            userId: user.id, // always attributed to the signed-in customer
             customerName: name,
             customerEmail: email,
             customerPhone: phone,

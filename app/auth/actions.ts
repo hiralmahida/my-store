@@ -25,6 +25,13 @@ function isValidEmail(email: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 }
 
+// Only allow same-origin relative paths as a post-login redirect target, to
+// avoid open-redirect abuse. Falls back to /account.
+function safeNext(value: FormDataEntryValue | null): string {
+  const s = typeof value === "string" ? value : "";
+  return s.startsWith("/") && !s.startsWith("//") ? s : "/account";
+}
+
 /** Register a new account, sign in, and merge any guest cart. */
 export async function register(
   _prev: AuthFormState,
@@ -54,7 +61,7 @@ export async function register(
 
   await createSession(user.id);
   await mergeGuestCartIntoUser(user.id);
-  redirect("/account");
+  redirect(safeNext(formData.get("next")));
 }
 
 /** Sign in with email + password, and merge any guest cart. */
@@ -80,7 +87,7 @@ export async function login(
 
   await createSession(user.id);
   await mergeGuestCartIntoUser(user.id);
-  redirect("/account");
+  redirect(safeNext(formData.get("next")));
 }
 
 /** Sign out and return to the homepage. Used directly as a <form action>. */

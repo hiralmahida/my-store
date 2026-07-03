@@ -173,11 +173,16 @@ export async function deleteProduct(id: string): Promise<void> {
     prisma.orderItem.count({ where: { productId: id } })
   );
   if (orderItems === 0) {
+    // Not referenced anywhere — hard delete (cascades images/cart/wishlist).
     await withDbRetry(() => prisma.product.delete({ where: { id } }));
   } else {
-    // Keep history intact — take it out of the catalog by zeroing stock instead.
+    // Referenced by past orders — soft-delete: mark deleted so historical order
+    // items still resolve, but it vanishes from the catalog and admin list.
     await withDbRetry(() =>
-      prisma.product.update({ where: { id }, data: { stock: 0, featured: false } })
+      prisma.product.update({
+        where: { id },
+        data: { deletedAt: new Date(), stock: 0, featured: false },
+      })
     );
     publishStockChange(id, 0);
   }
@@ -195,15 +200,14 @@ export async function updateOrderStatus(
   const status = String(formData.get("status") ?? "");
   if (!ORDER_STATUSES.includes(status as OrderStatus)) return;
 
-  // Push the new status live to the customer FIRST (LiveOrderStatus subscribes),
-  // so their view updates near-instantly instead of waiting on the database
-  // write — which dominates the latency and can be slow on a cold connection.
-  // The write below persists it; withDbRetry makes a transient failure unlikely.
-  publishOrderStatus(orderId, status);
-
+  // Persist first (correctness — never broadcast a status we didn't save), then
+  // push it live to the customer (LiveOrderStatus subscribes) and revalidate so
+  // the admin view reflects the new status too.
   await withDbRetry(() =>
     prisma.order.update({ where: { id: orderId }, data: { status: status as OrderStatus } })
   );
+
+  publishOrderStatus(orderId, status);
 
   revalidatePath("/admin/orders");
   revalidatePath(`/admin/orders/${orderId}`);
@@ -221,8 +225,17 @@ export async function toggleUserDisabled(userId: string): Promise<void> {
   );
   if (!user) return;
 
+  const nowDisabled = !user.disabled;
   await withDbRetry(() =>
-    prisma.user.update({ where: { id: userId }, data: { disabled: !user.disabled } })
+    prisma.user.update({ where: { id: userId }, data: { disabled: nowDisabled } })
   );
+
+  // Disabling must immediately invalidate the customer's sessions so any active
+  // login stops working right away (belt-and-suspenders with the disabled check
+  // in getCurrentUser).
+  if (nowDisabled) {
+    await withDbRetry(() => prisma.session.deleteMany({ where: { userId } }));
+  }
+
   revalidatePath("/admin/customers");
 }

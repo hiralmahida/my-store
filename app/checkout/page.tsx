@@ -25,6 +25,10 @@ const FALLBACK_IMAGE = "https://placehold.co/200x200/f1f5f9/94a3b8?text=No+Image
 export default async function CheckoutPage() {
   const [cart, user] = await Promise.all([getCart(), getCurrentUser()]);
 
+  // Must be signed in to check out (browsing and building a cart stays open to
+  // guests; placing an order requires an account).
+  if (!user) redirect("/login?next=/checkout");
+
   // Can't check out an empty cart.
   if (cart.items.length === 0) redirect("/cart");
 

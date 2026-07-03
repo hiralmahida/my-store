@@ -103,18 +103,26 @@ export default async function AccountPage() {
         ) : (
           <ul className="mt-4 divide-y divide-slate-100">
             {orders.map((order) => (
-              <li key={order.id} className="flex items-center justify-between py-3 text-sm">
-                <div>
-                  <p className="font-medium text-slate-900">
-                    Order #{order.id.slice(-8).toUpperCase()}
-                  </p>
-                  <p className="text-slate-500">
-                    {order.createdAt.toLocaleDateString("en-GB")} · {order.status}
-                  </p>
-                </div>
-                <span className="font-semibold text-slate-900">
-                  {formatQAR(order.total)}
-                </span>
+              <li key={order.id}>
+                <Link
+                  href={`/account/orders/${order.id}`}
+                  className="-mx-2 flex items-center justify-between rounded-lg px-2 py-3 text-sm transition hover:bg-slate-50"
+                >
+                  <div>
+                    <p className="font-medium text-slate-900">
+                      Order #{order.id.slice(-8).toUpperCase()}
+                    </p>
+                    <p className="text-slate-500">
+                      {order.createdAt.toLocaleDateString("en-GB")} · {order.status}
+                    </p>
+                  </div>
+                  <span className="flex items-center gap-2 font-semibold text-slate-900">
+                    {formatQAR(order.total)}
+                    <span aria-hidden="true" className="text-slate-300">
+                      ›
+                    </span>
+                  </span>
+                </Link>
               </li>
             ))}
           </ul>

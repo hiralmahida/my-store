@@ -67,10 +67,11 @@ function SubmitButton({ pending, label, pendingLabel }: { pending: boolean; labe
   );
 }
 
-export function LoginForm() {
+export function LoginForm({ next }: { next?: string }) {
   const [state, formAction, pending] = useActionState(login, INITIAL);
   return (
     <form action={formAction} className="space-y-4">
+      {next ? <input type="hidden" name="next" value={next} /> : null}
       <TopError message={state.error} />
       <Field label="Email" name="email" type="email" autoComplete="email" error={state.fieldErrors?.email} />
       <Field
@@ -85,10 +86,11 @@ export function LoginForm() {
   );
 }
 
-export function RegisterForm() {
+export function RegisterForm({ next }: { next?: string }) {
   const [state, formAction, pending] = useActionState(register, INITIAL);
   return (
     <form action={formAction} className="space-y-4">
+      {next ? <input type="hidden" name="next" value={next} /> : null}
       <TopError message={state.error} />
       <Field label="Full name" name="name" autoComplete="name" error={state.fieldErrors?.name} />
       <Field label="Email" name="email" type="email" autoComplete="email" error={state.fieldErrors?.email} />

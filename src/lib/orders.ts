@@ -6,7 +6,17 @@ import { prisma } from "@/src/lib/prisma";
 import { withDbRetry } from "@/src/lib/db";
 
 const orderInclude = {
-  items: { include: { product: { select: { name: true, slug: true } } } },
+  items: {
+    include: {
+      product: {
+        select: {
+          name: true,
+          slug: true,
+          images: { take: 1, select: { url: true, alt: true } },
+        },
+      },
+    },
+  },
   payment: true,
 } satisfies Prisma.OrderInclude;
 
