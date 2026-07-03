@@ -727,6 +727,131 @@ const products: SeedProduct[] = [
   },
 ];
 
+type OrderStatusName =
+  | "PENDING"
+  | "PAID"
+  | "SHIPPED"
+  | "DELIVERED"
+  | "CANCELLED"
+  | "REFUNDED";
+
+/**
+ * Generate a realistic spread of past orders across the last ~4 months, with
+ * varied customers (registered + guest), products, statuses and dates. These
+ * are historical records only — they intentionally do NOT decrement catalog
+ * stock (that happens at live checkout). Returns the number of orders created.
+ */
+async function seedOrderHistory(
+  productsPool: { id: string; price: number }[],
+  customers: { id: string; name: string; email: string }[]
+): Promise<number> {
+  function randInt(min: number, max: number) {
+    return Math.floor(Math.random() * (max - min + 1)) + min;
+  }
+  function pick<T>(arr: T[]): T {
+    return arr[randInt(0, arr.length - 1)];
+  }
+  function pickWeighted<T>(pairs: [T, number][]): T {
+    const total = pairs.reduce((sum, [, w]) => sum + w, 0);
+    let r = Math.random() * total;
+    for (const [value, w] of pairs) {
+      r -= w;
+      if (r < 0) return value;
+    }
+    return pairs[pairs.length - 1][0];
+  }
+  function ref(prefix: string) {
+    return `${prefix}-${Math.random().toString(36).slice(2, 10).toUpperCase()}`;
+  }
+  // Older orders are more likely delivered; recent ones are still in flight.
+  function statusForAge(daysAgo: number): OrderStatusName {
+    const table: [OrderStatusName, number][] =
+      daysAgo > 30
+        ? [["DELIVERED", 8], ["CANCELLED", 1], ["REFUNDED", 1]]
+        : daysAgo > 10
+          ? [["DELIVERED", 5], ["SHIPPED", 2], ["CANCELLED", 1]]
+          : daysAgo > 3
+            ? [["SHIPPED", 4], ["PAID", 2], ["DELIVERED", 1]]
+            : [["PAID", 3], ["PENDING", 1], ["SHIPPED", 1]];
+    return pickWeighted(table);
+  }
+
+  const cities = ["Doha", "Al Rayyan", "Al Wakrah", "Lusail", "Al Khor"];
+  const guestNames = ["Ahmed Khalifa", "Noora Saleh", "Ibrahim Nasser", "Mariam Jassim", "Khalid Rashid"];
+
+  const NUM_ORDERS = 44;
+  for (let i = 0; i < NUM_ORDERS; i++) {
+    // Guarantee a few orders today (so today's KPIs aren't empty), then skew the
+    // rest toward the recent past so the last-7-days chart also has data.
+    const daysAgo = i < 3 ? 0 : Math.floor(Math.pow(Math.random(), 1.7) * 120);
+    const createdAt = new Date();
+    createdAt.setDate(createdAt.getDate() - daysAgo);
+    createdAt.setHours(randInt(8, 21), randInt(0, 59), randInt(0, 59), 0);
+
+    const status = statusForAge(daysAgo);
+
+    // 1–3 distinct products.
+    const numItems = Math.min(randInt(1, 3), productsPool.length);
+    const chosen: { id: string; price: number; qty: number }[] = [];
+    const used = new Set<string>();
+    while (chosen.length < numItems) {
+      const p = pick(productsPool);
+      if (used.has(p.id)) continue;
+      used.add(p.id);
+      chosen.push({ id: p.id, price: p.price, qty: randInt(1, 2) });
+    }
+    const total = chosen.reduce((sum, c) => sum + c.price * c.qty, 0);
+
+    // ~70% registered customer (biased toward the demo customer), ~30% guest.
+    let userId: string | null = null;
+    let customerName: string;
+    let customerEmail: string;
+    if (Math.random() < 0.7 && customers.length > 0) {
+      const cust = Math.random() < 0.45 ? customers[0] : pick(customers);
+      userId = cust.id;
+      customerName = cust.name;
+      customerEmail = cust.email;
+    } else {
+      customerName = pick(guestNames);
+      customerEmail = customerName.toLowerCase().replace(/\s+/g, ".") + "@example.qa";
+    }
+
+    const method: "CARD" | "BNPL" = Math.random() < 0.65 ? "CARD" : "BNPL";
+    const city = pick(cities);
+
+    await prisma.order.create({
+      data: {
+        userId,
+        customerName,
+        customerEmail,
+        customerPhone: `+974 ${randInt(3000, 7999)} ${randInt(1000, 9999)}`,
+        shippingAddress: `Building ${randInt(1, 120)}, Street ${randInt(1, 60)}, ${city}, Qatar`,
+        status,
+        total,
+        createdAt,
+        items: {
+          create: chosen.map((c) => ({ productId: c.id, quantity: c.qty, unitPrice: c.price })),
+        },
+        // Pending orders have no captured payment yet.
+        payment:
+          status === "PENDING"
+            ? undefined
+            : {
+                create: {
+                  method,
+                  provider: method === "BNPL" ? "mock-bnpl" : "mock-card",
+                  reference: ref(method === "BNPL" ? "BNPL" : "MOCK-CARD"),
+                  amount: total,
+                  status: "SUCCEEDED",
+                },
+              },
+      },
+    });
+  }
+
+  return NUM_ORDERS;
+}
+
 async function main() {
   console.log("🌱  Seeding database…");
 
@@ -758,7 +883,9 @@ async function main() {
     brandIdBySlug.set(created.slug, created.id);
   }
 
-  // 3. Create products, each with a small gallery of placeholder images.
+  // 3. Create products, each with one real image. Remember id + price so we can
+  //    build realistic order history below.
+  const createdProducts: { id: string; price: number }[] = [];
   for (const p of products) {
     const categoryId = categoryIdBySlug.get(p.categorySlug);
     const brandId = brandIdBySlug.get(p.brandSlug);
@@ -766,7 +893,7 @@ async function main() {
       throw new Error(`Missing category/brand for product ${p.slug}`);
     }
 
-    await prisma.product.create({
+    const created = await prisma.product.create({
       data: {
         name: p.name,
         slug: p.slug,
@@ -779,11 +906,14 @@ async function main() {
         brandId,
         images: { create: imageFor(p.slug, p.name) },
       },
+      select: { id: true },
     });
+    createdProducts.push({ id: created.id, price: p.price });
   }
 
-  // 4. Create demo accounts (passwords hashed with scrypt — never stored raw).
-  //    These are advertised in the README for trying the app.
+  // 4. Create accounts (passwords hashed with scrypt — never stored raw). The
+  //    first two are the demo logins advertised in the README; the rest are
+  //    extra customers so order history and admin views look populated.
   const demoUsers: {
     name: string;
     email: string;
@@ -792,21 +922,35 @@ async function main() {
   }[] = [
     { name: "Store Admin", email: "admin@firststop.qa", password: "admin1234", role: "ADMIN" },
     { name: "Demo Customer", email: "customer@firststop.qa", password: "customer1234", role: "CUSTOMER" },
+    { name: "Fatima Al-Thani", email: "fatima@example.qa", password: "password1234", role: "CUSTOMER" },
+    { name: "Omar Hassan", email: "omar@example.qa", password: "password1234", role: "CUSTOMER" },
+    { name: "Layla Ahmed", email: "layla@example.qa", password: "password1234", role: "CUSTOMER" },
+    { name: "Yousef Ali", email: "yousef@example.qa", password: "password1234", role: "CUSTOMER" },
   ];
+  const customerUsers: { id: string; name: string; email: string }[] = [];
   for (const u of demoUsers) {
-    await prisma.user.create({
+    const created = await prisma.user.create({
       data: {
         name: u.name,
         email: u.email,
         role: u.role,
         passwordHash: await hashPassword(u.password),
       },
+      select: { id: true },
     });
+    if (u.role === "CUSTOMER") {
+      customerUsers.push({ id: created.id, name: u.name, email: u.email });
+    }
   }
+
+  // 5. Generate realistic order history spread across the last ~4 months, with
+  //    varied customers, products, statuses and dates. Historical orders do not
+  //    touch catalog stock (that only changes at live checkout).
+  const ordersCreated = await seedOrderHistory(createdProducts, customerUsers);
 
   console.log(
     `✅  Seeded ${categories.length} categories, ${brands.length} brands, ` +
-      `${products.length} products, ${demoUsers.length} demo users.`
+      `${products.length} products, ${demoUsers.length} users, ${ordersCreated} orders.`
   );
   console.log("   Demo admin:    admin@firststop.qa / admin1234");
   console.log("   Demo customer: customer@firststop.qa / customer1234");

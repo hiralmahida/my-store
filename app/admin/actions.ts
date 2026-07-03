@@ -195,12 +195,15 @@ export async function updateOrderStatus(
   const status = String(formData.get("status") ?? "");
   if (!ORDER_STATUSES.includes(status as OrderStatus)) return;
 
+  // Push the new status live to the customer FIRST (LiveOrderStatus subscribes),
+  // so their view updates near-instantly instead of waiting on the database
+  // write — which dominates the latency and can be slow on a cold connection.
+  // The write below persists it; withDbRetry makes a transient failure unlikely.
+  publishOrderStatus(orderId, status);
+
   await withDbRetry(() =>
     prisma.order.update({ where: { id: orderId }, data: { status: status as OrderStatus } })
   );
-
-  // Push the new status live to the customer (LiveOrderStatus subscribes).
-  publishOrderStatus(orderId, status);
 
   revalidatePath("/admin/orders");
   revalidatePath(`/admin/orders/${orderId}`);

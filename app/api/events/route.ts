@@ -59,6 +59,9 @@ export async function GET(request: NextRequest) {
       "Content-Type": "text/event-stream; charset=utf-8",
       "Cache-Control": "no-cache, no-transform",
       Connection: "keep-alive",
+      // Disable proxy/reverse-proxy buffering (e.g. nginx) so events are
+      // flushed to the client immediately instead of being batched.
+      "X-Accel-Buffering": "no",
     },
   });
 }
