@@ -4,6 +4,7 @@ import "./globals.css";
 import Header from "./components/Header";
 import Footer from "./components/Footer";
 import ConditionalChrome from "./components/ConditionalChrome";
+import ToastProvider from "./components/ToastProvider";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -35,9 +36,11 @@ export default function RootLayout({
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
       <body className="flex min-h-full flex-col bg-white text-slate-900">
-        <ConditionalChrome header={<Header />} footer={<Footer />}>
-          {children}
-        </ConditionalChrome>
+        <ToastProvider>
+          <ConditionalChrome header={<Header />} footer={<Footer />}>
+            {children}
+          </ConditionalChrome>
+        </ToastProvider>
       </body>
     </html>
   );

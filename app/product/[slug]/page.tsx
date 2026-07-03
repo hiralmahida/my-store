@@ -10,6 +10,7 @@ import ProductGallery from "@/app/components/ProductGallery";
 import QuantityAddToCart from "@/app/components/QuantityAddToCart";
 import WishlistButton from "@/app/components/WishlistButton";
 import LiveStock from "@/app/components/LiveStock";
+import RatingStars from "@/app/components/RatingStars";
 import ProductGrid from "@/app/components/ProductGrid";
 import { getProductBySlug, getRelatedProducts } from "@/src/lib/products";
 import { isWishlisted } from "@/src/lib/cart";
@@ -66,6 +67,21 @@ export default async function ProductPage({
   const priceNumber = Number(product.price.toString());
   const installment = priceNumber / 4;
 
+  // Sale price + discount badge, and a (mocked) estimated delivery date.
+  const compareAt =
+    product.compareAtPrice != null ? Number(product.compareAtPrice.toString()) : null;
+  const discountPct =
+    compareAt && compareAt > priceNumber
+      ? Math.round((1 - priceNumber / compareAt) * 100)
+      : null;
+  const eta = new Date();
+  eta.setDate(eta.getDate() + 3);
+  const etaLabel = eta.toLocaleDateString("en-GB", {
+    weekday: "long",
+    day: "numeric",
+    month: "short",
+  });
+
   // Only render specs that are a plain object of key/values.
   const specsEntries =
     product.specs && typeof product.specs === "object" && !Array.isArray(product.specs)
@@ -102,6 +118,12 @@ export default async function ProductPage({
             {product.name}
           </h1>
 
+          {product.rating != null && (
+            <div className="mt-2">
+              <RatingStars rating={product.rating} count={product.reviewCount} size="md" />
+            </div>
+          )}
+
           {/* Live stock — updates over SSE the moment it changes anywhere. */}
           <div className="mt-4">
             <LiveStock productId={product.id} initialStock={stock} />
@@ -109,9 +131,21 @@ export default async function ProductPage({
 
           {/* Price + BNPL split */}
           <div className="mt-6">
-            <p className="text-3xl font-bold text-slate-900">
-              {formatQAR(product.price)}
-            </p>
+            <div className="flex flex-wrap items-baseline gap-3">
+              <p className="text-3xl font-bold text-slate-900">
+                {formatQAR(product.price)}
+              </p>
+              {compareAt && discountPct !== null && (
+                <>
+                  <span className="text-lg text-slate-400 line-through">
+                    {formatQAR(compareAt)}
+                  </span>
+                  <span className="rounded-full bg-rose-600 px-2 py-0.5 text-xs font-bold text-white">
+                    Save {discountPct}%
+                  </span>
+                </>
+              )}
+            </div>
             <p className="mt-1 text-sm text-slate-500">
               or 4 interest-free payments of{" "}
               <span className="font-semibold text-slate-700">
@@ -125,10 +159,18 @@ export default async function ProductPage({
           <div className="mt-6 max-w-sm space-y-3">
             <QuantityAddToCart productId={product.id} stock={stock} />
             <WishlistButton productId={product.id} initialWishlisted={wishlisted} />
-            <p className="flex items-center gap-1.5 text-sm text-slate-500">
-              <TruckIcon className="h-4 w-4" />
-              Free local delivery across Qatar
-            </p>
+            <div className="space-y-1.5 pt-1">
+              <p className="flex items-center gap-1.5 text-sm text-slate-500">
+                <TruckIcon className="h-4 w-4" />
+                <span className="font-medium text-green-600">Free delivery</span> across Qatar
+              </p>
+              {stock > 0 && (
+                <p className="text-sm text-slate-500">
+                  Order today, get it by{" "}
+                  <span className="font-medium text-slate-700">{etaLabel}</span>
+                </p>
+              )}
+            </div>
           </div>
 
           {/* Description */}

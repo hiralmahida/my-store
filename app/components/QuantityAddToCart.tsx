@@ -8,6 +8,7 @@
 import { useState, useTransition } from "react";
 import Link from "next/link";
 import { addToCart } from "@/app/cart/actions";
+import { useToast } from "@/app/components/ToastProvider";
 
 export default function QuantityAddToCart({
   productId,
@@ -19,6 +20,7 @@ export default function QuantityAddToCart({
   const [qty, setQty] = useState(1);
   const [pending, startTransition] = useTransition();
   const [added, setAdded] = useState(0); // quantity last added (0 = none)
+  const toast = useToast();
 
   if (stock <= 0) {
     return (
@@ -38,6 +40,7 @@ export default function QuantityAddToCart({
     startTransition(async () => {
       await addToCart(productId, qty);
       setAdded(qty);
+      toast(`Added ${qty} to cart 🛒`);
     });
   };
 

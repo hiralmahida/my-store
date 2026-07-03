@@ -9,6 +9,7 @@
 
 import { useEffect, useState, useTransition } from "react";
 import { addToCart } from "@/app/cart/actions";
+import { useToast } from "@/app/components/ToastProvider";
 
 export default function QuickAddButton({
   productId,
@@ -19,6 +20,7 @@ export default function QuickAddButton({
 }) {
   const [pending, startTransition] = useTransition();
   const [added, setAdded] = useState(false);
+  const toast = useToast();
 
   // Reset the confirmation check after a moment.
   useEffect(() => {
@@ -46,6 +48,7 @@ export default function QuickAddButton({
     startTransition(async () => {
       await addToCart(productId);
       setAdded(true);
+      toast("Added to cart 🛒");
     });
   };
 

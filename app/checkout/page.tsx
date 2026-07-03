@@ -27,7 +27,7 @@ export default async function CheckoutPage() {
 
   // Must be signed in to check out (browsing and building a cart stays open to
   // guests; placing an order requires an account).
-  if (!user) redirect("/login?next=/checkout");
+  if (!user) redirect("/login?next=/checkout&flash=login-required");
 
   // Can't check out an empty cart.
   if (cart.items.length === 0) redirect("/cart");

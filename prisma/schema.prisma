@@ -57,6 +57,10 @@ model Product {
   slug        String   @unique
   description String   @db.Text
   price       Decimal  @db.Decimal(10, 2) // amount in QAR
+  // Original price, when the item is on sale (used to show a discount badge).
+  compareAtPrice Decimal? @db.Decimal(10, 2)
+  rating         Float?   // average review rating, e.g. 4.6 (null = no reviews)
+  reviewCount    Int      @default(0)
   stock       Int      @default(0)
   featured    Boolean  @default(false) // show on the homepage grid
   specs       Json     @default("{}") // flexible key/value tech specs

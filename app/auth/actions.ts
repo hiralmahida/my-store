@@ -32,6 +32,11 @@ function safeNext(value: FormDataEntryValue | null): string {
   return s.startsWith("/") && !s.startsWith("//") ? s : "/account";
 }
 
+// Append a ?flash=<key> param so the destination shows a toast on arrival.
+function withFlash(path: string, flash: string): string {
+  return path + (path.includes("?") ? "&" : "?") + "flash=" + flash;
+}
+
 /** Register a new account, sign in, and merge any guest cart. */
 export async function register(
   _prev: AuthFormState,
@@ -61,7 +66,7 @@ export async function register(
 
   await createSession(user.id);
   await mergeGuestCartIntoUser(user.id);
-  redirect(safeNext(formData.get("next")));
+  redirect(withFlash(safeNext(formData.get("next")), "signin"));
 }
 
 /** Sign in with email + password, and merge any guest cart. */
@@ -87,7 +92,7 @@ export async function login(
 
   await createSession(user.id);
   await mergeGuestCartIntoUser(user.id);
-  redirect(safeNext(formData.get("next")));
+  redirect(withFlash(safeNext(formData.get("next")), "signin"));
 }
 
 /** Sign out and return to the homepage. Used directly as a <form action>. */

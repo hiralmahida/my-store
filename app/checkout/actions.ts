@@ -176,5 +176,5 @@ export async function placeOrder(
   }
 
   revalidatePath("/", "layout"); // header cart badge resets to 0
-  redirect(`/checkout/success?order=${order.id}`);
+  redirect(`/checkout/success?order=${order.id}&flash=order`);
 }

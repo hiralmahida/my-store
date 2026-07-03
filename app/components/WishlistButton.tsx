@@ -6,6 +6,7 @@
 
 import { useState, useTransition } from "react";
 import { toggleWishlist } from "@/app/cart/actions";
+import { useToast } from "@/app/components/ToastProvider";
 
 export default function WishlistButton({
   productId,
@@ -18,10 +19,13 @@ export default function WishlistButton({
 }) {
   const [wishlisted, setWishlisted] = useState(initialWishlisted);
   const [isPending, startTransition] = useTransition();
+  const toast = useToast();
 
   const handleClick = () => {
     // Optimistic flip; the server action reconciles the true state.
-    setWishlisted((prev) => !prev);
+    const next = !wishlisted;
+    setWishlisted(next);
+    toast(next ? "Saved to wishlist ❤️" : "Removed from wishlist");
     startTransition(async () => {
       await toggleWishlist(productId);
     });

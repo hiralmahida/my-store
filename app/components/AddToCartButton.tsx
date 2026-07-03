@@ -7,6 +7,7 @@
 import { useState, useTransition } from "react";
 import Link from "next/link";
 import { addToCart } from "@/app/cart/actions";
+import { useToast } from "@/app/components/ToastProvider";
 
 export default function AddToCartButton({
   productId,
@@ -19,6 +20,7 @@ export default function AddToCartButton({
 }) {
   const [isPending, startTransition] = useTransition();
   const [added, setAdded] = useState(false);
+  const toast = useToast();
 
   if (disabled) {
     return (
@@ -36,6 +38,7 @@ export default function AddToCartButton({
     startTransition(async () => {
       await addToCart(productId);
       setAdded(true);
+      toast("Added to cart 🛒");
     });
   };
 

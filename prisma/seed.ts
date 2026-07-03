@@ -893,12 +893,25 @@ async function main() {
       throw new Error(`Missing category/brand for product ${p.slug}`);
     }
 
+    // Ratings and an occasional sale price so the UI can show star ratings and
+    // discount badges "where data supports it".
+    const rating = Math.round((4.0 + Math.random() * 0.9) * 10) / 10; // 4.0–4.9
+    const reviewCount = Math.floor(Math.random() * 473) + 8; // 8–480
+    // ~45% of products are on sale: original price 10–30% above the sell price.
+    const compareAtPrice =
+      Math.random() < 0.45
+        ? Math.round(p.price * (1 + 0.1 + Math.random() * 0.2))
+        : null;
+
     const created = await prisma.product.create({
       data: {
         name: p.name,
         slug: p.slug,
         description: p.description,
         price: p.price,
+        compareAtPrice,
+        rating,
+        reviewCount,
         stock: p.stock,
         featured: p.featured,
         specs: p.specs,
