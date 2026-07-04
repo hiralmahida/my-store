@@ -125,6 +125,8 @@ model Order {
   updatedAt       DateTime    @updatedAt
   items           OrderItem[]
   payment         Payment?
+  events          OrderEvent[]
+  tags            String[]    @default([]) // admin labels, e.g. "priority", "gift"
 
   // Optional link to a registered user (guest checkout leaves this null).
   // Populated at checkout, powering the account order history.
@@ -132,6 +134,28 @@ model Order {
   user   User?   @relation(fields: [userId], references: [id])
 
   @@index([userId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+/// An entry in an order's activity timeline (status changes, notes, refunds).
+enum OrderEventType {
+  PLACED
+  STATUS_CHANGE
+  NOTE
+  REFUND
+}
+
+model OrderEvent {
+  id        String         @id @default(cuid())
+  orderId   String
+  order     Order          @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  type      OrderEventType
+  message   String
+  actor     String? // admin who performed it (null = system/customer)
+  createdAt DateTime       @default(now())
+
+  @@index([orderId])
 }
 
 /// A single line item within an order. `unitPrice` snapshots the product's

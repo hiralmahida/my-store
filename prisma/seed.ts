@@ -819,6 +819,33 @@ async function seedOrderHistory(
     const method: "CARD" | "BNPL" = Math.random() < 0.65 ? "CARD" : "BNPL";
     const city = pick(cities);
 
+    // Timeline events reflecting how this order reached its current status.
+    const day = 86_400_000;
+    const evt = (type: string, message: string, offsetDays: number) => ({
+      type: type as "STATUS_CHANGE" | "REFUND",
+      message,
+      actor: "Store Admin",
+      createdAt: new Date(createdAt.getTime() + offsetDays * day),
+    });
+    const events: ReturnType<typeof evt>[] = [];
+    if (status === "SHIPPED") events.push(evt("STATUS_CHANGE", "Marked as Shipped", 1));
+    else if (status === "DELIVERED") {
+      events.push(evt("STATUS_CHANGE", "Marked as Shipped", 1), evt("STATUS_CHANGE", "Marked as Delivered", 3));
+    } else if (status === "CANCELLED") events.push(evt("STATUS_CHANGE", "Order cancelled", 1));
+    else if (status === "REFUNDED") {
+      events.push(evt("STATUS_CHANGE", "Marked as Shipped", 1), evt("REFUND", "Order refunded to original payment method", 4));
+    }
+
+    // Random tags on ~35% of orders.
+    const TAG_POOL = ["priority", "gift", "fragile", "repeat-customer", "bulk"];
+    const tags: string[] = [];
+    if (Math.random() < 0.35) {
+      const set = new Set<string>();
+      const n = 1 + Math.floor(Math.random() * 2);
+      while (set.size < n) set.add(pick(TAG_POOL));
+      tags.push(...set);
+    }
+
     await prisma.order.create({
       data: {
         userId,
@@ -829,6 +856,8 @@ async function seedOrderHistory(
         status,
         total,
         createdAt,
+        tags,
+        events: events.length > 0 ? { create: events } : undefined,
         items: {
           create: chosen.map((c) => ({ productId: c.id, quantity: c.qty, unitPrice: c.price })),
         },

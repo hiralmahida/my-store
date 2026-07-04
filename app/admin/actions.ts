@@ -17,7 +17,11 @@ export interface AdminActionState {
 }
 
 async function ensureAdmin() {
-  await requireRole(["ADMIN", "SUPERADMIN"]);
+  return requireRole(["ADMIN", "SUPERADMIN"]);
+}
+
+function statusLabel(status: string): string {
+  return status.charAt(0) + status.slice(1).toLowerCase();
 }
 
 function slugify(input: string): string {
@@ -196,20 +200,121 @@ export async function updateOrderStatus(
   orderId: string,
   formData: FormData
 ): Promise<void> {
-  await ensureAdmin();
+  const admin = await ensureAdmin();
   const status = String(formData.get("status") ?? "");
   if (!ORDER_STATUSES.includes(status as OrderStatus)) return;
 
-  // Persist first (correctness — never broadcast a status we didn't save), then
-  // push it live to the customer (LiveOrderStatus subscribes) and revalidate so
-  // the admin view reflects the new status too.
+  // Persist the status change AND a timeline event atomically, then push the
+  // new status live to the customer (LiveOrderStatus subscribes) and revalidate
+  // so the admin view reflects it too.
   await withDbRetry(() =>
-    prisma.order.update({ where: { id: orderId }, data: { status: status as OrderStatus } })
+    prisma.$transaction([
+      prisma.order.update({ where: { id: orderId }, data: { status: status as OrderStatus } }),
+      prisma.orderEvent.create({
+        data: {
+          orderId,
+          type: "STATUS_CHANGE",
+          message: `Marked as ${statusLabel(status)}`,
+          actor: admin.name,
+        },
+      }),
+    ])
   );
 
   publishOrderStatus(orderId, status);
 
   revalidatePath("/admin/orders");
+  revalidatePath(`/admin/orders/${orderId}`);
+}
+
+/** Change status for many orders at once (bulk action). */
+export async function bulkUpdateOrderStatus(orderIds: string[], status: string): Promise<void> {
+  const admin = await ensureAdmin();
+  if (!ORDER_STATUSES.includes(status as OrderStatus) || orderIds.length === 0) return;
+
+  await withDbRetry(() =>
+    prisma.$transaction([
+      prisma.order.updateMany({
+        where: { id: { in: orderIds } },
+        data: { status: status as OrderStatus },
+      }),
+      prisma.orderEvent.createMany({
+        data: orderIds.map((id) => ({
+          orderId: id,
+          type: "STATUS_CHANGE" as const,
+          message: `Marked as ${statusLabel(status)} (bulk update)`,
+          actor: admin.name,
+        })),
+      }),
+    ])
+  );
+
+  for (const id of orderIds) publishOrderStatus(id, status);
+  revalidatePath("/admin/orders");
+}
+
+/** Add an internal note to an order's timeline. */
+export async function addOrderNote(orderId: string, formData: FormData): Promise<void> {
+  const admin = await ensureAdmin();
+  const note = String(formData.get("note") ?? "").trim();
+  if (!note) return;
+  await withDbRetry(() =>
+    prisma.orderEvent.create({
+      data: { orderId, type: "NOTE", message: note, actor: admin.name },
+    })
+  );
+  revalidatePath(`/admin/orders/${orderId}`);
+}
+
+/** Refund an order (marks it REFUNDED and logs a timeline event). */
+export async function refundOrder(orderId: string): Promise<void> {
+  const admin = await ensureAdmin();
+  await withDbRetry(() =>
+    prisma.$transaction([
+      prisma.order.update({ where: { id: orderId }, data: { status: "REFUNDED" } }),
+      prisma.orderEvent.create({
+        data: {
+          orderId,
+          type: "REFUND",
+          message: "Order refunded to original payment method",
+          actor: admin.name,
+        },
+      }),
+    ])
+  );
+  publishOrderStatus(orderId, "REFUNDED");
+  revalidatePath("/admin/orders");
+  revalidatePath(`/admin/orders/${orderId}`);
+}
+
+/** Add a tag to an order. */
+export async function addOrderTag(orderId: string, formData: FormData): Promise<void> {
+  await ensureAdmin();
+  const tag = String(formData.get("tag") ?? "").trim().toLowerCase().replace(/\s+/g, "-");
+  if (!tag) return;
+  const order = await withDbRetry(() =>
+    prisma.order.findUnique({ where: { id: orderId }, select: { tags: true } })
+  );
+  if (!order || order.tags.includes(tag)) return;
+  await withDbRetry(() =>
+    prisma.order.update({ where: { id: orderId }, data: { tags: { set: [...order.tags, tag] } } })
+  );
+  revalidatePath(`/admin/orders/${orderId}`);
+}
+
+/** Remove a tag from an order. */
+export async function removeOrderTag(orderId: string, tag: string): Promise<void> {
+  await ensureAdmin();
+  const order = await withDbRetry(() =>
+    prisma.order.findUnique({ where: { id: orderId }, select: { tags: true } })
+  );
+  if (!order) return;
+  await withDbRetry(() =>
+    prisma.order.update({
+      where: { id: orderId },
+      data: { tags: { set: order.tags.filter((t) => t !== tag) } },
+    })
+  );
   revalidatePath(`/admin/orders/${orderId}`);
 }
 

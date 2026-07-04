@@ -156,29 +156,113 @@ export type AdminOrderRow = Prisma.OrderGetPayload<{
   include: { payment: true; _count: { select: { items: true } } };
 }>;
 
-export async function listAdminOrders(status?: string): Promise<AdminOrderRow[]> {
-  const where: Prisma.OrderWhereInput = {};
-  // Only apply a valid status filter.
-  const VALID = ["PENDING", "PAID", "SHIPPED", "DELIVERED", "CANCELLED", "REFUNDED"];
-  if (status && VALID.includes(status)) {
-    where.status = status as Prisma.OrderWhereInput["status"];
-  }
+// Saved views → status filter (undefined = no status filter, i.e. all).
+export const ORDER_VIEWS: { key: string; label: string; status?: string }[] = [
+  { key: "all", label: "All" },
+  { key: "unfulfilled", label: "Unfulfilled", status: "PAID" },
+  { key: "shipped", label: "Shipped", status: "SHIPPED" },
+  { key: "delivered", label: "Delivered", status: "DELIVERED" },
+  { key: "cancelled", label: "Cancelled", status: "CANCELLED" },
+  { key: "refunded", label: "Refunded", status: "REFUNDED" },
+];
 
+export interface OrderListParams {
+  view?: string;
+  q?: string;
+  sort?: string;
+  dir?: string;
+  page?: number;
+  perPage?: number;
+}
+
+export interface OrderListResult {
+  rows: AdminOrderRow[];
+  total: number;
+  page: number;
+  perPage: number;
+  totalPages: number;
+}
+
+function buildOrderWhere(params: OrderListParams): Prisma.OrderWhereInput {
+  const where: Prisma.OrderWhereInput = {};
+  const view = ORDER_VIEWS.find((v) => v.key === (params.view ?? "all"));
+  if (view?.status) where.status = view.status as Prisma.OrderWhereInput["status"];
+
+  const q = params.q?.trim();
+  if (q) {
+    where.OR = [
+      { customerName: { contains: q, mode: "insensitive" } },
+      { customerEmail: { contains: q, mode: "insensitive" } },
+      { id: { contains: q.toLowerCase() } },
+    ];
+  }
+  return where;
+}
+
+function orderOrderBy(sort?: string, dir?: string): Prisma.OrderOrderByWithRelationInput {
+  const d: "asc" | "desc" = dir === "asc" ? "asc" : "desc";
+  switch (sort) {
+    case "total":
+      return { total: d };
+    case "status":
+      return { status: d };
+    case "customer":
+      return { customerName: d };
+    case "date":
+    default:
+      return { createdAt: d };
+  }
+}
+
+export async function listAdminOrders(params: OrderListParams = {}): Promise<OrderListResult> {
+  const page = Math.max(1, Math.floor(params.page ?? 1));
+  const perPage = Math.min(100, Math.max(5, Math.floor(params.perPage ?? 20)));
+  const where = buildOrderWhere(params);
+
+  const [rows, total] = await withDbRetry(() =>
+    prisma.$transaction([
+      prisma.order.findMany({
+        where,
+        include: { payment: true, _count: { select: { items: true } } },
+        orderBy: orderOrderBy(params.sort, params.dir),
+        skip: (page - 1) * perPage,
+        take: perPage,
+      }),
+      prisma.order.count({ where }),
+    ])
+  );
+
+  return { rows, total, page, perPage, totalPages: Math.max(1, Math.ceil(total / perPage)) };
+}
+
+/** All matching orders (no pagination) for CSV export. */
+export async function getOrdersForExport(params: OrderListParams = {}) {
   return withDbRetry(() =>
     prisma.order.findMany({
-      where,
-      include: { payment: true, _count: { select: { items: true } } },
-      orderBy: { createdAt: "desc" },
-      take: 500, // high cap so placed orders are never hidden from admin
+      where: buildOrderWhere(params),
+      include: { _count: { select: { items: true } }, payment: { select: { method: true } } },
+      orderBy: orderOrderBy(params.sort, params.dir),
+      take: 5000,
     })
   );
 }
 
 export type AdminOrderDetail = Prisma.OrderGetPayload<{
   include: {
-    items: { include: { product: { select: { name: true; slug: true } } } };
+    items: {
+      include: {
+        product: {
+          select: {
+            name: true;
+            slug: true;
+            images: { take: 1; select: { url: true; alt: true } };
+          };
+        };
+      };
+    };
     payment: true;
     user: { select: { name: true; email: true } };
+    events: true;
   };
 }>;
 
@@ -187,9 +271,20 @@ export async function getAdminOrder(id: string): Promise<AdminOrderDetail | null
     prisma.order.findUnique({
       where: { id },
       include: {
-        items: { include: { product: { select: { name: true, slug: true } } } },
+        items: {
+          include: {
+            product: {
+              select: {
+                name: true,
+                slug: true,
+                images: { take: 1, select: { url: true, alt: true } },
+              },
+            },
+          },
+        },
         payment: true,
         user: { select: { name: true, email: true } },
+        events: { orderBy: { createdAt: "asc" } },
       },
     })
   );

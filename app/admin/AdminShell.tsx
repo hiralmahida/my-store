@@ -134,7 +134,7 @@ export default function AdminShell({
     <div className="min-h-screen bg-slate-50">
       {/* Desktop sidebar */}
       <aside
-        className={`fixed inset-y-0 left-0 z-30 hidden shrink-0 bg-slate-900 transition-all lg:block ${sidebarWidth}`}
+        className={`fixed inset-y-0 left-0 z-30 hidden shrink-0 bg-slate-900 transition-all lg:block print:hidden ${sidebarWidth}`}
       >
         {sidebarInner}
       </aside>
@@ -153,9 +153,9 @@ export default function AdminShell({
       )}
 
       {/* Main column (offset by the sidebar width on desktop) */}
-      <div className={`flex min-h-screen flex-col transition-all ${collapsed ? "lg:pl-16" : "lg:pl-60"}`}>
+      <div className={`flex min-h-screen flex-col transition-all print:!pl-0 ${collapsed ? "lg:pl-16" : "lg:pl-60"}`}>
         {/* Top bar */}
-        <header className="sticky top-0 z-20 flex items-center gap-3 border-b border-slate-200 bg-white/90 px-4 py-3 backdrop-blur sm:px-6">
+        <header className="sticky top-0 z-20 flex items-center gap-3 border-b border-slate-200 bg-white/90 px-4 py-3 backdrop-blur print:hidden sm:px-6">
           <button
             type="button"
             onClick={() => setMobileOpen(true)}
