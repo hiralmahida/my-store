@@ -12,8 +12,12 @@ import { withDbRetry } from "@/src/lib/db";
 // out of sync with the query.
 const cardInclude = {
   brand: true,
-  images: { take: 1 },
+  images: { take: 1, orderBy: { position: "asc" } },
 } satisfies Prisma.ProductInclude;
+
+// Storefront visibility guard: shoppers only ever see live products —
+// published (ACTIVE) and not soft-deleted. Draft/Archived stay admin-only.
+const STOREFRONT_VISIBLE = { deletedAt: null, status: "ACTIVE" } as const;
 
 // The row shape a `ProductCard` receives. Derived from `cardInclude` so it
 // always matches exactly what the queries below select.
@@ -29,7 +33,7 @@ export type FeaturedProduct = ProductCardData;
 export async function getFeaturedProducts(limit = 8): Promise<ProductCardData[]> {
   return withDbRetry(() =>
     prisma.product.findMany({
-      where: { featured: true, deletedAt: null },
+      where: { featured: true, ...STOREFRONT_VISIBLE },
       include: cardInclude,
       orderBy: { createdAt: "desc" },
       take: limit,
@@ -90,9 +94,9 @@ export async function listProducts(filters: ProductFilters = {}): Promise<Produc
   const page = Math.max(1, Math.floor(filters.page ?? 1));
   const perPage = Math.min(48, Math.max(1, Math.floor(filters.perPage ?? 12)));
 
-  // Build the WHERE clause from whichever filters are present. Soft-deleted
-  // products are always excluded from the storefront.
-  const where: Prisma.ProductWhereInput = { deletedAt: null };
+  // Build the WHERE clause from whichever filters are present. Soft-deleted and
+  // non-ACTIVE (draft/archived) products are always excluded from the storefront.
+  const where: Prisma.ProductWhereInput = { ...STOREFRONT_VISIBLE };
 
   if (filters.categorySlug) {
     where.category = { slug: filters.categorySlug };
@@ -161,7 +165,7 @@ export async function listProducts(filters: ProductFilters = {}): Promise<Produc
 const detailInclude = {
   brand: true,
   category: true,
-  images: true,
+  images: { orderBy: { position: "asc" } },
 } satisfies Prisma.ProductInclude;
 
 export type ProductDetail = Prisma.ProductGetPayload<{ include: typeof detailInclude }>;
@@ -170,7 +174,7 @@ export type ProductDetail = Prisma.ProductGetPayload<{ include: typeof detailInc
 export async function getProductBySlug(slug: string): Promise<ProductDetail | null> {
   return withDbRetry(() =>
     prisma.product.findFirst({
-      where: { slug, deletedAt: null },
+      where: { slug, ...STOREFRONT_VISIBLE },
       include: detailInclude,
     })
   );
@@ -189,7 +193,7 @@ export async function getRelatedProducts(
       where: {
         categoryId: product.categoryId,
         id: { not: product.id },
-        deletedAt: null,
+        ...STOREFRONT_VISIBLE,
       },
       include: cardInclude,
       orderBy: { createdAt: "desc" },

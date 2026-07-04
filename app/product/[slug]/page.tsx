@@ -27,8 +27,8 @@ export async function generateMetadata({
   const product = await getProductBySlug(slug);
   if (!product) return { title: "Product not found — FirstStop" };
   return {
-    title: `${product.name} — FirstStop`,
-    description: product.description.slice(0, 160),
+    title: product.seoTitle?.trim() || `${product.name} — FirstStop`,
+    description: product.seoDescription?.trim() || product.description.slice(0, 160),
   };
 }
 

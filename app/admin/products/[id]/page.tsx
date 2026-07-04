@@ -42,11 +42,24 @@ export default async function EditProductPage({
           slug: product.slug,
           description: product.description,
           price: product.price.toString(),
+          compareAtPrice: product.compareAtPrice?.toString() ?? "",
           stock: product.stock,
+          lowStockThreshold: product.lowStockThreshold,
+          status: product.status,
           featured: product.featured,
           categoryId: product.categoryId,
           brandId: product.brandId,
-          imageUrl: product.images[0]?.url ?? "",
+          seoTitle: product.seoTitle,
+          seoDescription: product.seoDescription,
+          images: product.images.map((img) => ({ url: img.url, alt: img.alt ?? "" })),
+          variants: product.variants.map((v) => ({
+            id: v.id,
+            name: v.name,
+            options: (v.options ?? {}) as Record<string, string>,
+            sku: v.sku,
+            price: v.price?.toString() ?? "",
+            stock: v.stock,
+          })),
         }}
         submitLabel="Save changes"
       />

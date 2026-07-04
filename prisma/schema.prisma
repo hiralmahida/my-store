@@ -49,6 +49,16 @@ model Brand {
   products Product[]
 }
 
+/// Publication state of a product. Only ACTIVE products are visible on the
+/// storefront; DRAFT is a work-in-progress (admin-only) and ARCHIVED is a
+/// retired listing kept out of the catalog. This is distinct from `deletedAt`
+/// (soft delete for products referenced by past orders).
+enum ProductStatus {
+  ACTIVE
+  DRAFT
+  ARCHIVED
+}
+
 /// A sellable product. Prices are stored in QAR using a fixed-precision
 /// Decimal so money math stays exact (never use Float for currency).
 model Product {
@@ -61,9 +71,15 @@ model Product {
   compareAtPrice Decimal? @db.Decimal(10, 2)
   rating         Float?   // average review rating, e.g. 4.6 (null = no reviews)
   reviewCount    Int      @default(0)
-  stock       Int      @default(0)
+  stock       Int           @default(0)
+  status      ProductStatus @default(ACTIVE)
+  // Below this stock level the product is flagged low-stock in admin views.
+  lowStockThreshold Int     @default(5)
   featured    Boolean  @default(false) // show on the homepage grid
   specs       Json     @default("{}") // flexible key/value tech specs
+  // Optional SEO overrides for the storefront <title>/<meta description>.
+  seoTitle       String?
+  seoDescription String? @db.Text
   createdAt   DateTime @default(now())
   // Soft delete: set when a product referenced by past orders is "deleted".
   // Such rows are hidden from the storefront and admin list but kept so
@@ -78,6 +94,8 @@ model Product {
 
   // One product has many images.
   images        ProductImage[]
+  variants      ProductVariant[]
+  adjustments   StockAdjustment[]
   orderItems    OrderItem[]
   cartItems     CartItem[]
   wishlistItems WishlistItem[]
@@ -85,17 +103,61 @@ model Product {
   @@index([categoryId])
   @@index([brandId])
   @@index([deletedAt])
+  @@index([status])
 }
 
-/// An image belonging to a product. A product can have several.
+/// An image belonging to a product. A product can have several. `position`
+/// orders the gallery (0 = primary/first image).
 model ProductImage {
   id        String  @id @default(cuid())
   url       String
   alt       String? // accessible alt text
+  position  Int     @default(0)
   productId String
   product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
 
   @@index([productId])
+}
+
+/// A purchasable variant of a product (e.g. a specific colour / storage combo).
+/// Admin-managed catalog metadata: `options` holds the axis values
+/// (e.g. { "Color": "Black", "Storage": "256GB" }), `price` overrides the
+/// product price when set (null = inherit), and `stock` is tracked per variant.
+model ProductVariant {
+  id        String   @id @default(cuid())
+  productId String
+  product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  name      String   // display label, e.g. "Black / 256GB"
+  options   Json     @default("{}") // { axis: value } map
+  sku       String?
+  price     Decimal? @db.Decimal(10, 2) // null = inherit product price
+  stock     Int      @default(0)
+  position  Int      @default(0)
+  createdAt DateTime @default(now())
+
+  adjustments StockAdjustment[]
+
+  @@index([productId])
+}
+
+/// An entry in the stock-change history: who changed what, by how much, when.
+/// Written on manual inventory adjustments and on stock edits from the product
+/// editor. Records both the delta and the resulting stock for auditability.
+model StockAdjustment {
+  id        String          @id @default(cuid())
+  productId String
+  product   Product         @relation(fields: [productId], references: [id], onDelete: Cascade)
+  variantId String?
+  variant   ProductVariant? @relation(fields: [variantId], references: [id], onDelete: Cascade)
+  delta     Int             // signed change applied (e.g. +10, -3)
+  newStock  Int             // resulting stock after the change
+  reason    String?         // e.g. "Restock", "Correction", "Product edit"
+  actor     String?         // admin who made the change (null = system)
+  createdAt DateTime        @default(now())
+
+  @@index([productId])
+  @@index([variantId])
+  @@index([createdAt])
 }
 
 // ---------------------------------------------------------------------------

@@ -126,27 +126,287 @@ export async function getRecentNotifications(limit = 20) {
 
 // --- Products ---------------------------------------------------------------
 
-export type AdminProductRow = Prisma.ProductGetPayload<{
-  include: { brand: true; category: true };
-}>;
+export const PRODUCT_STATUSES = ["ACTIVE", "DRAFT", "ARCHIVED"] as const;
+export type ProductStatusValue = (typeof PRODUCT_STATUSES)[number];
 
-export async function listAdminProducts(): Promise<AdminProductRow[]> {
-  return withDbRetry(() =>
-    prisma.product.findMany({
-      where: { deletedAt: null }, // hide soft-deleted products from the admin list
-      include: { brand: true, category: true },
-      orderBy: { createdAt: "desc" },
-    })
+export interface AdminProductListParams {
+  q?: string;
+  status?: string; // one of PRODUCT_STATUSES; undefined = all
+  sort?: string; // name | price | stock | created
+  dir?: string;
+  page?: number;
+  perPage?: number;
+}
+
+/** A serializable product row for the admin list (Decimals → numbers). */
+export interface AdminProductRow {
+  id: string;
+  name: string;
+  slug: string;
+  price: number;
+  compareAtPrice: number | null;
+  stock: number;
+  lowStockThreshold: number;
+  status: string;
+  featured: boolean;
+  brandName: string;
+  categoryName: string;
+  image: string | null;
+  variantCount: number;
+}
+
+export interface AdminProductListResult {
+  rows: AdminProductRow[];
+  total: number;
+  page: number;
+  perPage: number;
+  totalPages: number;
+  counts: { all: number; active: number; draft: number; archived: number };
+}
+
+function buildProductWhere(params: AdminProductListParams): Prisma.ProductWhereInput {
+  // Soft-deleted products never appear in the admin catalog list.
+  const where: Prisma.ProductWhereInput = { deletedAt: null };
+  const q = params.q?.trim();
+  if (q) {
+    where.OR = [
+      { name: { contains: q, mode: "insensitive" } },
+      { slug: { contains: q, mode: "insensitive" } },
+      { brand: { name: { contains: q, mode: "insensitive" } } },
+    ];
+  }
+  return where;
+}
+
+function productOrderBy(sort?: string, dir?: string): Prisma.ProductOrderByWithRelationInput {
+  const d: "asc" | "desc" = dir === "asc" ? "asc" : "desc";
+  switch (sort) {
+    case "name":
+      return { name: d };
+    case "price":
+      return { price: d };
+    case "stock":
+      return { stock: d };
+    case "created":
+    default:
+      return { createdAt: d };
+  }
+}
+
+export async function listAdminProducts(
+  params: AdminProductListParams = {}
+): Promise<AdminProductListResult> {
+  const page = Math.max(1, Math.floor(params.page ?? 1));
+  const perPage = Math.min(100, Math.max(5, Math.floor(params.perPage ?? 20)));
+  const baseWhere = buildProductWhere(params);
+
+  // Status tabs count within the current search but ignore the status filter.
+  const statusValid =
+    params.status && (PRODUCT_STATUSES as readonly string[]).includes(params.status)
+      ? (params.status as ProductStatusValue)
+      : undefined;
+  const where: Prisma.ProductWhereInput = statusValid
+    ? { ...baseWhere, status: statusValid }
+    : baseWhere;
+
+  const [products, total, grouped] = await withDbRetry(() =>
+    prisma.$transaction(
+      [
+        prisma.product.findMany({
+          where,
+          include: {
+            brand: { select: { name: true } },
+            category: { select: { name: true } },
+            images: { take: 1, orderBy: { position: "asc" }, select: { url: true } },
+            _count: { select: { variants: true } },
+          },
+          orderBy: productOrderBy(params.sort, params.dir),
+          skip: (page - 1) * perPage,
+          take: perPage,
+        }),
+        prisma.product.count({ where }),
+        prisma.product.groupBy({ by: ["status"], where: baseWhere, _count: true }),
+      ],
+      { maxWait: 15000, timeout: 20000 }
+    )
   );
+
+  const byStatus = new Map(grouped.map((g) => [g.status, g._count]));
+  const active = byStatus.get("ACTIVE") ?? 0;
+  const draft = byStatus.get("DRAFT") ?? 0;
+  const archived = byStatus.get("ARCHIVED") ?? 0;
+
+  return {
+    rows: products.map((p) => ({
+      id: p.id,
+      name: p.name,
+      slug: p.slug,
+      price: toNumber(p.price),
+      compareAtPrice: p.compareAtPrice == null ? null : toNumber(p.compareAtPrice),
+      stock: p.stock,
+      lowStockThreshold: p.lowStockThreshold,
+      status: p.status,
+      featured: p.featured,
+      brandName: p.brand.name,
+      categoryName: p.category.name,
+      image: p.images[0]?.url ?? null,
+      variantCount: p._count.variants,
+    })),
+    total,
+    page,
+    perPage,
+    totalPages: Math.max(1, Math.ceil(total / perPage)),
+    counts: { all: active + draft + archived, active, draft, archived },
+  };
 }
 
 export type AdminProductDetail = Prisma.ProductGetPayload<{
-  include: { images: true };
+  include: {
+    images: { orderBy: { position: "asc" } };
+    variants: { orderBy: { position: "asc" } };
+  };
 }>;
 
 export async function getAdminProduct(id: string): Promise<AdminProductDetail | null> {
   return withDbRetry(() =>
-    prisma.product.findUnique({ where: { id }, include: { images: true } })
+    prisma.product.findUnique({
+      where: { id },
+      include: {
+        images: { orderBy: { position: "asc" } },
+        variants: { orderBy: { position: "asc" } },
+      },
+    })
+  );
+}
+
+// --- Inventory --------------------------------------------------------------
+
+export const INVENTORY_FILTERS = ["all", "low", "out"] as const;
+
+export interface InventoryParams {
+  q?: string;
+  filter?: string; // all | low | out
+  page?: number;
+  perPage?: number;
+}
+
+export interface InventoryVariantRow {
+  id: string;
+  name: string;
+  sku: string | null;
+  stock: number;
+}
+
+export interface InventoryRow {
+  id: string;
+  name: string;
+  slug: string;
+  image: string | null;
+  status: string;
+  stock: number;
+  lowStockThreshold: number;
+  low: boolean;
+  out: boolean;
+  variants: InventoryVariantRow[];
+}
+
+export interface InventoryResult {
+  rows: InventoryRow[];
+  total: number;
+  page: number;
+  perPage: number;
+  totalPages: number;
+  counts: { all: number; low: number; out: number };
+}
+
+/**
+ * Inventory listing. Low-stock is a per-product threshold comparison
+ * (`stock <= lowStockThreshold`), which Prisma can't express column-to-column,
+ * so we fetch the (bounded) catalog and compute low/out + paginate in memory.
+ * Fine for a modest catalog; revisit with a raw query if it grows large.
+ */
+export async function listInventory(params: InventoryParams = {}): Promise<InventoryResult> {
+  const page = Math.max(1, Math.floor(params.page ?? 1));
+  const perPage = Math.min(100, Math.max(5, Math.floor(params.perPage ?? 20)));
+  const q = params.q?.trim();
+
+  const where: Prisma.ProductWhereInput = { deletedAt: null };
+  if (q) {
+    where.OR = [
+      { name: { contains: q, mode: "insensitive" } },
+      { brand: { name: { contains: q, mode: "insensitive" } } },
+    ];
+  }
+
+  const products = await withDbRetry(() =>
+    prisma.product.findMany({
+      where,
+      include: {
+        images: { take: 1, orderBy: { position: "asc" }, select: { url: true } },
+        variants: {
+          orderBy: { position: "asc" },
+          select: { id: true, name: true, sku: true, stock: true },
+        },
+      },
+      orderBy: { stock: "asc" }, // scarcest first
+      take: 1000,
+    })
+  );
+
+  const all: InventoryRow[] = products.map((p) => ({
+    id: p.id,
+    name: p.name,
+    slug: p.slug,
+    image: p.images[0]?.url ?? null,
+    status: p.status,
+    stock: p.stock,
+    lowStockThreshold: p.lowStockThreshold,
+    out: p.stock <= 0,
+    low: p.stock > 0 && p.stock <= p.lowStockThreshold,
+    variants: p.variants,
+  }));
+
+  const counts = {
+    all: all.length,
+    low: all.filter((r) => r.low).length,
+    out: all.filter((r) => r.out).length,
+  };
+
+  const filter = (INVENTORY_FILTERS as readonly string[]).includes(params.filter ?? "")
+    ? params.filter
+    : "all";
+  const filtered =
+    filter === "low" ? all.filter((r) => r.low) : filter === "out" ? all.filter((r) => r.out) : all;
+
+  const total = filtered.length;
+  const rows = filtered.slice((page - 1) * perPage, page * perPage);
+
+  return {
+    rows,
+    total,
+    page,
+    perPage,
+    totalPages: Math.max(1, Math.ceil(total / perPage)),
+    counts,
+  };
+}
+
+export type StockHistoryRow = Prisma.StockAdjustmentGetPayload<{
+  include: { product: { select: { name: true; slug: true } }; variant: { select: { name: true } } };
+}>;
+
+/** Recent stock-change history, optionally scoped to one product. */
+export async function getStockHistory(limit = 50, productId?: string): Promise<StockHistoryRow[]> {
+  return withDbRetry(() =>
+    prisma.stockAdjustment.findMany({
+      where: productId ? { productId } : undefined,
+      include: {
+        product: { select: { name: true, slug: true } },
+        variant: { select: { name: true } },
+      },
+      orderBy: { createdAt: "desc" },
+      take: limit,
+    })
   );
 }
 
