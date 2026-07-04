@@ -9,6 +9,7 @@ import { redirect } from "next/navigation";
 import Link from "next/link";
 import SafeImage from "@/app/components/SafeImage";
 import CheckoutForm from "@/app/components/CheckoutForm";
+import CouponBox from "@/app/checkout/CouponBox";
 import { getCart } from "@/src/lib/cart";
 import { getCurrentUser } from "@/src/lib/auth";
 import { formatQAR } from "@/src/lib/format";
@@ -80,11 +81,32 @@ export default async function CheckoutPage() {
             })}
           </ul>
 
-          <dl className="mt-6 space-y-3 border-t border-slate-100 pt-4 text-sm">
+          {/* Coupon */}
+          <div className="mt-6 border-t border-slate-100 pt-4">
+            <CouponBox
+              applied={{
+                code: cart.discountCode,
+                label: cart.discountLabel,
+                discount: cart.discount,
+                automatic: cart.discountAuto,
+                error: cart.discountError,
+              }}
+            />
+          </div>
+
+          <dl className="mt-4 space-y-3 border-t border-slate-100 pt-4 text-sm">
             <div className="flex justify-between">
               <dt className="text-slate-500">Subtotal</dt>
               <dd className="font-medium text-slate-900">{formatQAR(cart.subtotal)}</dd>
             </div>
+            {cart.discount > 0 && (
+              <div className="flex justify-between">
+                <dt className="text-slate-500">
+                  Discount{cart.discountCode ? ` (${cart.discountCode})` : ""}
+                </dt>
+                <dd className="font-medium text-green-600">−{formatQAR(cart.discount)}</dd>
+              </div>
+            )}
             <div className="flex justify-between">
               <dt className="text-slate-500">Delivery</dt>
               <dd className="font-medium text-green-600">Free</dd>

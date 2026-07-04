@@ -961,8 +961,20 @@ async function main() {
     email: string;
     password: string;
     role: "CUSTOMER" | "ADMIN" | "SUPERADMIN";
+    // Admin section keys a STAFF member may access (ignored for SUPERADMIN/CUSTOMER).
+    permissions?: string[];
   }[] = [
-    { name: "Store Admin", email: "admin@firststop.qa", password: "admin1234", role: "ADMIN" },
+    // The store owner: full access + staff management.
+    { name: "Store Admin", email: "admin@firststop.qa", password: "admin1234", role: "SUPERADMIN" },
+    // A limited staff member — can only reach Orders & Products (demonstrates
+    // section-level permissions).
+    {
+      name: "Sara Staff",
+      email: "staff@firststop.qa",
+      password: "staff1234",
+      role: "ADMIN",
+      permissions: ["dashboard", "orders", "products"],
+    },
     { name: "Demo Customer", email: "customer@firststop.qa", password: "customer1234", role: "CUSTOMER" },
     { name: "Fatima Al-Thani", email: "fatima@example.qa", password: "password1234", role: "CUSTOMER" },
     { name: "Omar Hassan", email: "omar@example.qa", password: "password1234", role: "CUSTOMER" },
@@ -976,6 +988,7 @@ async function main() {
         name: u.name,
         email: u.email,
         role: u.role,
+        permissions: u.role === "ADMIN" ? (u.permissions ?? []) : [],
         passwordHash: await hashPassword(u.password),
       },
       select: { id: true },
@@ -994,7 +1007,8 @@ async function main() {
     `✅  Seeded ${categories.length} categories, ${brands.length} brands, ` +
       `${products.length} products, ${demoUsers.length} users, ${ordersCreated} orders.`
   );
-  console.log("   Demo admin:    admin@firststop.qa / admin1234");
+  console.log("   Superadmin:    admin@firststop.qa / admin1234");
+  console.log("   Staff (limited): staff@firststop.qa / staff1234");
   console.log("   Demo customer: customer@firststop.qa / customer1234");
 }
 

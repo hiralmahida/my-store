@@ -11,6 +11,7 @@ import type { Prisma } from "@/app/generated/prisma/client";
 import { prisma } from "@/src/lib/prisma";
 import { withDbRetry } from "@/src/lib/db";
 import { getCurrentUser } from "@/src/lib/auth";
+import { resolveDiscount } from "@/src/lib/discounts";
 
 // The cookie name that ties a browser to its cart/wishlist rows.
 export const CART_SESSION_COOKIE = "cart_session";
@@ -58,9 +59,14 @@ export type CartItemWithProduct = Prisma.CartItemGetPayload<{
 export interface CartSummary {
   items: CartItemWithProduct[];
   itemCount: number; // total quantity across all lines
-  subtotal: number; // QAR
+  subtotal: number; // QAR (before discount)
+  discount: number; // QAR taken off by a coupon (0 = none)
+  discountCode: string | null; // coupon code in effect, if any
+  discountLabel: string | null; // e.g. "SAVE10 — 10% off"
+  discountAuto: boolean; // true when auto-applied (no code entered)
+  discountError: string | null; // set when an entered code no longer qualifies
   deliveryFee: number; // QAR (0 = free)
-  total: number; // QAR
+  total: number; // QAR (subtotal − discount + delivery)
   installment: number; // total split into 4 (BNPL preview)
 }
 
@@ -68,6 +74,11 @@ const EMPTY_CART: CartSummary = {
   items: [],
   itemCount: 0,
   subtotal: 0,
+  discount: 0,
+  discountCode: null,
+  discountLabel: null,
+  discountAuto: false,
+  discountError: null,
   deliveryFee: DELIVERY_FEE,
   total: 0,
   installment: 0,
@@ -99,12 +110,21 @@ export async function getCart(): Promise<CartSummary> {
     cart.items.reduce((sum, item) => sum + toNumber(item.product.price) * item.quantity, 0)
   );
   const itemCount = cart.items.reduce((sum, item) => sum + item.quantity, 0);
-  const total = round2(subtotal + DELIVERY_FEE);
+
+  // Apply any coupon (entered or automatic). The subtotal is the raw goods
+  // total; the discount comes off before delivery.
+  const applied = await resolveDiscount(subtotal);
+  const total = round2(subtotal - applied.discount + DELIVERY_FEE);
 
   return {
     items: cart.items,
     itemCount,
     subtotal,
+    discount: applied.discount,
+    discountCode: applied.code,
+    discountLabel: applied.label,
+    discountAuto: applied.automatic,
+    discountError: applied.error,
     deliveryFee: DELIVERY_FEE,
     total,
     installment: round2(total / 4),

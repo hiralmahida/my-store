@@ -7,6 +7,7 @@
 
 "use server";
 
+import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/src/lib/prisma";
@@ -17,7 +18,48 @@ import { formatQAR } from "@/src/lib/format";
 import { getPaymentProvider } from "@/src/lib/payments";
 import { publishStockChange, publishOrderStatus } from "@/src/lib/events";
 import { recordNotification } from "@/src/lib/notifications";
+import { checkCoupon, COUPON_COOKIE } from "@/src/lib/discounts";
 import type { PaymentMethod } from "@/app/generated/prisma/client";
+
+export interface CouponState {
+  error?: string;
+  success?: string;
+}
+
+/** Apply a coupon code entered at checkout: validate it, then store it in the
+ *  `coupon` cookie so getCart() reflects the discount everywhere. */
+export async function applyCoupon(
+  _prev: CouponState,
+  formData: FormData
+): Promise<CouponState> {
+  const cart = await getCart();
+  if (cart.items.length === 0) return { error: "Your cart is empty." };
+
+  const code = String(formData.get("code") ?? "");
+  const res = await checkCoupon(code, cart.subtotal);
+  if (!res.ok || !res.coupon) return { error: res.error ?? "That coupon code isn't valid." };
+
+  const store = await cookies();
+  store.set(COUPON_COOKIE, res.coupon.code, {
+    httpOnly: true,
+    sameSite: "lax",
+    path: "/",
+    secure: process.env.NODE_ENV === "production",
+    maxAge: 60 * 60 * 24 * 7, // a week
+  });
+
+  revalidatePath("/checkout");
+  revalidatePath("/cart");
+  return { success: `Applied ${res.coupon.code}.` };
+}
+
+/** Remove any applied coupon. Used directly as a <form action>. */
+export async function removeCoupon(): Promise<void> {
+  const store = await cookies();
+  store.delete(COUPON_COOKIE);
+  revalidatePath("/checkout");
+  revalidatePath("/cart");
+}
 
 // Products at or below this level trigger a low-stock admin notification.
 const LOW_STOCK_THRESHOLD = 5;
@@ -99,6 +141,24 @@ export async function placeOrder(
   const order = await withDbRetry(() =>
     prisma.$transaction(
       async (tx) => {
+        // Resolve + consume the applied coupon (if any). getCart already
+        // validated it, so we look it up by the snapshotted code and bump its
+        // usage count within the same transaction as the order.
+        let couponId: string | null = null;
+        if (cart.discountCode && cart.discount > 0) {
+          const coupon = await tx.coupon.findUnique({
+            where: { code: cart.discountCode },
+            select: { id: true },
+          });
+          if (coupon) {
+            couponId = coupon.id;
+            await tx.coupon.update({
+              where: { id: coupon.id },
+              data: { usageCount: { increment: 1 } },
+            });
+          }
+        }
+
         const created = await tx.order.create({
           data: {
             userId: user.id, // always attributed to the signed-in customer
@@ -108,6 +168,9 @@ export async function placeOrder(
             shippingAddress,
             status: "PAID",
             total: cart.total,
+            discount: cart.discount,
+            couponCode: cart.discountCode,
+            couponId,
           },
           select: { id: true },
         });
@@ -174,6 +237,10 @@ export async function placeOrder(
   } catch {
     // Real-time is non-critical; ignore failures.
   }
+
+  // Clear the applied coupon so it doesn't carry over to the next cart.
+  const cookieStore = await cookies();
+  cookieStore.delete(COUPON_COOKIE);
 
   revalidatePath("/", "layout"); // header cart badge resets to 0
   redirect(`/checkout/success?order=${order.id}&flash=order`);

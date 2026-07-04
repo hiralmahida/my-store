@@ -3,6 +3,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import Header from "./components/Header";
 import Footer from "./components/Footer";
+import PromoBanner from "./components/PromoBanner";
 import ConditionalChrome from "./components/ConditionalChrome";
 import ToastProvider from "./components/ToastProvider";
 
@@ -37,7 +38,11 @@ export default function RootLayout({
     >
       <body className="flex min-h-full flex-col bg-white text-slate-900">
         <ToastProvider>
-          <ConditionalChrome header={<Header />} footer={<Footer />}>
+          <ConditionalChrome
+            banner={<PromoBanner />}
+            header={<Header />}
+            footer={<Footer />}
+          >
             {children}
           </ConditionalChrome>
         </ToastProvider>

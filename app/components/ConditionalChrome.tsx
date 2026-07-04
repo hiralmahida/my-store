@@ -11,10 +11,12 @@
 import { usePathname } from "next/navigation";
 
 export default function ConditionalChrome({
+  banner,
   header,
   footer,
   children,
 }: {
+  banner: React.ReactNode;
   header: React.ReactNode;
   footer: React.ReactNode;
   children: React.ReactNode;
@@ -28,6 +30,7 @@ export default function ConditionalChrome({
 
   return (
     <>
+      {banner}
       {header}
       <main className="flex-1">{children}</main>
       {footer}

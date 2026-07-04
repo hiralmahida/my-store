@@ -182,7 +182,14 @@ model Order {
   customerPhone   String?
   shippingAddress String?
   status          OrderStatus @default(PENDING)
-  total           Decimal     @db.Decimal(10, 2) // order total in QAR
+  total           Decimal     @db.Decimal(10, 2) // order total in QAR (after discount)
+  // Coupon applied at checkout, if any. `discount` is the QAR amount taken off
+  // the subtotal; `couponCode` snapshots the code so it stays on record even if
+  // the coupon is later edited or deleted.
+  discount        Decimal     @default(0) @db.Decimal(10, 2)
+  couponCode      String?
+  couponId        String?
+  coupon          Coupon?     @relation(fields: [couponId], references: [id])
   createdAt       DateTime    @default(now())
   updatedAt       DateTime    @updatedAt
   items           OrderItem[]
@@ -198,6 +205,7 @@ model Order {
   @@index([userId])
   @@index([status])
   @@index([createdAt])
+  @@index([couponId])
 }
 
 /// An entry in an order's activity timeline (status changes, notes, refunds).
@@ -344,6 +352,14 @@ model User {
   name         String
   role         Role      @default(CUSTOMER)
   disabled     Boolean   @default(false) // admins can disable an account
+  // Admin section keys a STAFF (ADMIN) member may access, e.g. ["orders",
+  // "products"]. Ignored for CUSTOMER (no admin access) and SUPERADMIN (full
+  // access). See src/lib/permissions.ts.
+  permissions  String[]  @default([])
+  // Customer CRM fields (admin-managed): freeform labels and an internal note
+  // shown only in the admin customer profile.
+  tags         String[]  @default([])
+  notes        String?   @db.Text
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
 
@@ -386,4 +402,56 @@ model Notification {
   createdAt DateTime         @default(now())
 
   @@index([createdAt])
+}
+
+// ---------------------------------------------------------------------------
+// Discounts (Phase D)
+//
+// A coupon reduces the cart subtotal at checkout, either by a percentage or a
+// fixed QAR amount. Guardrails: an optional minimum order, an expiry, and a
+// total usage limit. `automatic` coupons apply without a code (the storefront
+// picks the best-qualifying one); the rest are entered by the shopper.
+// ---------------------------------------------------------------------------
+
+enum DiscountType {
+  PERCENTAGE // `value` is a percent, 1–100
+  FIXED      // `value` is a QAR amount taken off the subtotal
+}
+
+model Coupon {
+  id          String       @id @default(cuid())
+  code        String       @unique // stored upper-cased, e.g. "SAVE10"
+  description String? // optional admin-facing note
+  type        DiscountType
+  value       Decimal      @db.Decimal(10, 2) // percent (1–100) or QAR amount
+  minOrder    Decimal?     @db.Decimal(10, 2) // minimum subtotal to qualify
+  usageLimit  Int? // max total redemptions (null = unlimited)
+  usageCount  Int          @default(0)
+  expiresAt   DateTime? // null = never expires
+  active      Boolean      @default(true)
+  automatic   Boolean      @default(false) // auto-applies without a code
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  orders Order[]
+
+  @@index([active])
+}
+
+// ---------------------------------------------------------------------------
+// Store settings (Phase D)
+//
+// A single-row table holding basic store details and the storefront promo
+// banner. Accessed via a fixed id so there is always exactly one row.
+// ---------------------------------------------------------------------------
+
+model StoreSetting {
+  id           String   @id @default("singleton")
+  storeName    String   @default("FirstStop")
+  contactEmail String   @default("")
+  contactPhone String   @default("")
+  deliveryInfo String   @default("") @db.Text
+  promoText    String   @default("")
+  promoActive  Boolean  @default(false)
+  updatedAt    DateTime @updatedAt
 }

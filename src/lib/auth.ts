@@ -21,6 +21,9 @@ export interface CurrentUser {
   email: string;
   name: string;
   role: Role;
+  // Admin section keys a STAFF member may access (empty for customers; ignored
+  // for superadmins, who have full access). See src/lib/permissions.ts.
+  permissions: string[];
 }
 
 /**
@@ -63,7 +66,13 @@ export async function getCurrentUser(): Promise<CurrentUser | null> {
   }
 
   const { user } = session;
-  return { id: user.id, email: user.email, name: user.name, role: user.role };
+  return {
+    id: user.id,
+    email: user.email,
+    name: user.name,
+    role: user.role,
+    permissions: user.permissions,
+  };
 }
 
 /** Delete the current session and clear the cookie. Server Action only. */

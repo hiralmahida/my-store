@@ -552,41 +552,251 @@ export async function getAdminOrder(id: string): Promise<AdminOrderDetail | null
 
 // --- Customers --------------------------------------------------------------
 
+// Simple segments for filtering the customer list.
+export const CUSTOMER_SEGMENTS = [
+  { key: "all", label: "All customers" },
+  { key: "repeat", label: "Repeat buyers" },
+  { key: "high", label: "High spenders" },
+] as const;
+
+// Lifetime spend (QAR) at or above which a customer is a "high spender".
+export const HIGH_SPENDER_THRESHOLD = 5000;
+
 export type CustomerRow = {
   id: string;
   name: string;
   email: string;
-  role: string;
   disabled: boolean;
   createdAt: Date;
-  orderCount: number;
+  orderCount: number; // count of real (non-cancelled/refunded) orders
+  spend: number; // lifetime spend in QAR
 };
 
-export async function listCustomers(): Promise<CustomerRow[]> {
+export interface CustomerListParams {
+  q?: string;
+  segment?: string;
+}
+
+/**
+ * Compute lifetime spend per user id from real (revenue) orders. Returned as a
+ * Map for O(1) lookup when assembling customer rows.
+ */
+async function spendByUser(userIds: string[]): Promise<Map<string, { spend: number; count: number }>> {
+  const map = new Map<string, { spend: number; count: number }>();
+  if (userIds.length === 0) return map;
+
+  const grouped = await withDbRetry(() =>
+    prisma.order.groupBy({
+      by: ["userId"],
+      where: { userId: { in: userIds }, status: { in: [...REVENUE_STATUSES] } },
+      _sum: { total: true },
+      _count: { _all: true },
+    })
+  );
+
+  for (const g of grouped) {
+    if (!g.userId) continue;
+    map.set(g.userId, { spend: toNumber(g._sum.total), count: g._count._all });
+  }
+  return map;
+}
+
+/**
+ * The customer list (CUSTOMER role only — staff are managed in Settings), with
+ * optional name/email search and a segment filter. Order counts and lifetime
+ * spend reflect real sales (cancelled/refunded orders are excluded).
+ */
+export async function listCustomers(params: CustomerListParams = {}): Promise<CustomerRow[]> {
+  const q = (params.q ?? "").trim();
+  const segment = params.segment ?? "all";
+
   const users = await withDbRetry(() =>
     prisma.user.findMany({
+      where: {
+        role: "CUSTOMER",
+        ...(q
+          ? {
+              OR: [
+                { name: { contains: q, mode: "insensitive" } },
+                { email: { contains: q, mode: "insensitive" } },
+              ],
+            }
+          : {}),
+      },
       orderBy: { createdAt: "desc" },
+      select: { id: true, name: true, email: true, disabled: true, createdAt: true },
+    })
+  );
+
+  const spend = await spendByUser(users.map((u) => u.id));
+
+  const rows: CustomerRow[] = users.map((u) => {
+    const s = spend.get(u.id);
+    return {
+      id: u.id,
+      name: u.name,
+      email: u.email,
+      disabled: u.disabled,
+      createdAt: u.createdAt,
+      orderCount: s?.count ?? 0,
+      spend: s?.spend ?? 0,
+    };
+  });
+
+  if (segment === "repeat") return rows.filter((r) => r.orderCount >= 2);
+  if (segment === "high") return rows.filter((r) => r.spend >= HIGH_SPENDER_THRESHOLD);
+  return rows;
+}
+
+export type CustomerDetail = Prisma.UserGetPayload<{
+  select: {
+    id: true;
+    name: true;
+    email: true;
+    role: true;
+    disabled: true;
+    tags: true;
+    notes: true;
+    createdAt: true;
+  };
+}> & {
+  orders: {
+    id: string;
+    total: number;
+    discount: number;
+    status: string;
+    createdAt: Date;
+    itemCount: number;
+  }[];
+  spend: number; // lifetime spend (revenue orders)
+  orderCount: number; // count of revenue orders
+};
+
+/** A single customer's profile: contact, tags/notes, order history, lifetime value. */
+export async function getCustomer(id: string): Promise<CustomerDetail | null> {
+  const user = await withDbRetry(() =>
+    prisma.user.findUnique({
+      where: { id },
       select: {
         id: true,
         name: true,
         email: true,
         role: true,
         disabled: true,
+        tags: true,
+        notes: true,
         createdAt: true,
+        orders: {
+          orderBy: { createdAt: "desc" },
+          select: {
+            id: true,
+            total: true,
+            discount: true,
+            status: true,
+            createdAt: true,
+            _count: { select: { items: true } },
+          },
+        },
+      },
+    })
+  );
+  if (!user) return null;
+
+  const { orders, ...rest } = user;
+  const revenue = orders.filter((o) => (REVENUE_STATUSES as readonly string[]).includes(o.status));
+
+  return {
+    ...rest,
+    orders: orders.map((o) => ({
+      id: o.id,
+      total: toNumber(o.total),
+      discount: toNumber(o.discount),
+      status: o.status,
+      createdAt: o.createdAt,
+      itemCount: o._count.items,
+    })),
+    spend: revenue.reduce((sum, o) => sum + toNumber(o.total), 0),
+    orderCount: revenue.length,
+  };
+}
+
+// --- Coupons / discounts ----------------------------------------------------
+
+export type CouponRow = Prisma.CouponGetPayload<{
+  select: {
+    id: true;
+    code: true;
+    description: true;
+    type: true;
+    value: true;
+    minOrder: true;
+    usageLimit: true;
+    usageCount: true;
+    expiresAt: true;
+    active: true;
+    automatic: true;
+    _count: { select: { orders: true } };
+  };
+}>;
+
+/** All coupons, newest first, for the discounts admin list. */
+export async function listCoupons(): Promise<CouponRow[]> {
+  return withDbRetry(() =>
+    prisma.coupon.findMany({
+      orderBy: { createdAt: "desc" },
+      select: {
+        id: true,
+        code: true,
+        description: true,
+        type: true,
+        value: true,
+        minOrder: true,
+        usageLimit: true,
+        usageCount: true,
+        expiresAt: true,
+        active: true,
+        automatic: true,
         _count: { select: { orders: true } },
       },
     })
   );
+}
 
-  return users.map((u) => ({
-    id: u.id,
-    name: u.name,
-    email: u.email,
-    role: u.role,
-    disabled: u.disabled,
-    createdAt: u.createdAt,
-    orderCount: u._count.orders,
-  }));
+export async function getCoupon(id: string) {
+  return withDbRetry(() => prisma.coupon.findUnique({ where: { id } }));
+}
+
+// --- Staff ------------------------------------------------------------------
+
+export type StaffRow = Prisma.UserGetPayload<{
+  select: {
+    id: true;
+    name: true;
+    email: true;
+    role: true;
+    disabled: true;
+    permissions: true;
+    createdAt: true;
+  };
+}>;
+
+/** All staff accounts (ADMIN + SUPERADMIN), for the Settings staff manager. */
+export async function listStaff(): Promise<StaffRow[]> {
+  return withDbRetry(() =>
+    prisma.user.findMany({
+      where: { role: { in: ["ADMIN", "SUPERADMIN"] } },
+      orderBy: [{ role: "asc" }, { createdAt: "asc" }],
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        role: true,
+        disabled: true,
+        permissions: true,
+        createdAt: true,
+      },
+    })
+  );
 }
 
 // --- Dashboard date ranges & metrics ---------------------------------------

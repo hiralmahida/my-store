@@ -3,6 +3,7 @@
 
 import type { NextRequest } from "next/server";
 import { getCurrentUser } from "@/src/lib/auth";
+import { canAccess } from "@/src/lib/permissions";
 import { getOrdersForExport } from "@/src/lib/admin";
 import { prisma } from "@/src/lib/prisma";
 import { withDbRetry } from "@/src/lib/db";
@@ -16,7 +17,7 @@ function csvCell(v: string): string {
 
 export async function GET(request: NextRequest) {
   const user = await getCurrentUser();
-  if (!user || (user.role !== "ADMIN" && user.role !== "SUPERADMIN")) {
+  if (!user || (user.role !== "ADMIN" && user.role !== "SUPERADMIN") || !canAccess(user, "orders")) {
     return new Response("Forbidden", { status: 403 });
   }
 

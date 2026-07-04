@@ -33,21 +33,30 @@ const IconChevron = svg(<path d="M9 18l6-6-6-6" />);
 const IconMenu = svg(<><path d="M3 12h18" /><path d="M3 6h18" /><path d="M3 18h18" /></>);
 const IconSearch = svg(<><circle cx="11" cy="11" r="7" /><path d="m21 21-4.3-4.3" /></>);
 
-const NAV: { href: string; label: string; icon: (p: { className?: string }) => React.ReactNode; exact?: boolean }[] = [
-  { href: "/admin", label: "Dashboard", icon: IconHome, exact: true },
-  { href: "/admin/orders", label: "Orders", icon: IconBag },
-  { href: "/admin/products", label: "Products", icon: IconTag },
-  { href: "/admin/inventory", label: "Inventory", icon: IconBoxes },
-  { href: "/admin/customers", label: "Customers", icon: IconUsers },
-  { href: "/admin/discounts", label: "Discounts", icon: IconTicket },
-  { href: "/admin/settings", label: "Settings", icon: IconCog },
+const NAV: {
+  href: string;
+  label: string;
+  icon: (p: { className?: string }) => React.ReactNode;
+  section: string;
+  exact?: boolean;
+}[] = [
+  { href: "/admin", label: "Dashboard", icon: IconHome, section: "dashboard", exact: true },
+  { href: "/admin/orders", label: "Orders", icon: IconBag, section: "orders" },
+  { href: "/admin/products", label: "Products", icon: IconTag, section: "products" },
+  { href: "/admin/inventory", label: "Inventory", icon: IconBoxes, section: "inventory" },
+  { href: "/admin/customers", label: "Customers", icon: IconUsers, section: "customers" },
+  { href: "/admin/discounts", label: "Discounts", icon: IconTicket, section: "discounts" },
+  { href: "/admin/settings", label: "Settings", icon: IconCog, section: "settings" },
 ];
 
 export default function AdminShell({
   userName,
+  sections,
   children,
 }: {
   userName: string;
+  /** Admin section keys this user may see in the nav (from the layout guard). */
+  sections: string[];
   children: React.ReactNode;
 }) {
   const pathname = usePathname() ?? "";
@@ -59,9 +68,12 @@ export default function AdminShell({
 
   const sidebarWidth = collapsed ? "lg:w-16" : "lg:w-60";
 
+  const allowed = new Set(sections);
+  const visibleNav = NAV.filter((item) => allowed.has(item.section));
+
   const navList = (
     <nav className="flex-1 space-y-1 px-3">
-      {NAV.map(({ href, label, icon: Icon, exact }) => {
+      {visibleNav.map(({ href, label, icon: Icon, exact }) => {
         const active = isActive(href, exact);
         return (
           <Link

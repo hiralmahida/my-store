@@ -9,11 +9,16 @@ import { prisma } from "@/src/lib/prisma";
 import { withDbRetry } from "@/src/lib/db";
 import { requireRole } from "@/src/lib/auth";
 import { publishStockChange, publishOrderStatus } from "@/src/lib/events";
-import type { OrderStatus } from "@/app/generated/prisma/client";
+import { hashPassword } from "@/src/lib/password";
+import { normalizeCode } from "@/src/lib/discounts";
+import { sanitizePermissions } from "@/src/lib/permissions";
+import { SETTINGS_ID } from "@/src/lib/settings";
+import type { OrderStatus, DiscountType, Role } from "@/app/generated/prisma/client";
 
 export interface AdminActionState {
   error?: string;
   fieldErrors?: Record<string, string>;
+  success?: string;
 }
 
 async function ensureAdmin() {
@@ -599,4 +604,280 @@ export async function toggleUserDisabled(userId: string): Promise<void> {
   }
 
   revalidatePath("/admin/customers");
+  revalidatePath(`/admin/customers/${userId}`);
+  revalidatePath("/admin/settings");
+}
+
+/** Save a customer's internal note (admin-only, shown on the profile). */
+export async function updateCustomerNotes(userId: string, formData: FormData): Promise<void> {
+  await ensureAdmin();
+  const notes = String(formData.get("notes") ?? "").trim();
+  await withDbRetry(() =>
+    prisma.user.update({ where: { id: userId }, data: { notes: notes || null } })
+  );
+  revalidatePath(`/admin/customers/${userId}`);
+}
+
+/** Add a tag to a customer (deduped, trimmed). */
+export async function addCustomerTag(userId: string, formData: FormData): Promise<void> {
+  await ensureAdmin();
+  const tag = String(formData.get("tag") ?? "").trim();
+  if (!tag) return;
+
+  const user = await withDbRetry(() =>
+    prisma.user.findUnique({ where: { id: userId }, select: { tags: true } })
+  );
+  if (!user || user.tags.includes(tag)) return;
+
+  await withDbRetry(() =>
+    prisma.user.update({ where: { id: userId }, data: { tags: { push: tag } } })
+  );
+  revalidatePath(`/admin/customers/${userId}`);
+}
+
+/** Remove a tag from a customer. */
+export async function removeCustomerTag(userId: string, tag: string): Promise<void> {
+  await ensureAdmin();
+  const user = await withDbRetry(() =>
+    prisma.user.findUnique({ where: { id: userId }, select: { tags: true } })
+  );
+  if (!user) return;
+
+  await withDbRetry(() =>
+    prisma.user.update({
+      where: { id: userId },
+      data: { tags: { set: user.tags.filter((t) => t !== tag) } },
+    })
+  );
+  revalidatePath(`/admin/customers/${userId}`);
+}
+
+// --- Coupons / discounts ----------------------------------------------------
+
+// Parse the shared coupon form fields into validated column values, or return
+// an error message. Used by both create and update.
+function parseCouponForm(formData: FormData):
+  | { ok: true; data: CouponWriteData }
+  | { ok: false; error: string } {
+  const code = normalizeCode(String(formData.get("code") ?? ""));
+  if (!/^[A-Z0-9_-]{3,32}$/.test(code)) {
+    return { ok: false, error: "Code must be 3–32 letters, numbers, - or _." };
+  }
+
+  const type: DiscountType =
+    String(formData.get("type") ?? "PERCENTAGE").toUpperCase() === "FIXED" ? "FIXED" : "PERCENTAGE";
+
+  const value = Number(formData.get("value"));
+  if (!Number.isFinite(value) || value <= 0) {
+    return { ok: false, error: "Enter a discount value greater than 0." };
+  }
+  if (type === "PERCENTAGE" && value > 100) {
+    return { ok: false, error: "A percentage discount can't exceed 100%." };
+  }
+
+  const minOrderRaw = String(formData.get("minOrder") ?? "").trim();
+  const minOrder = minOrderRaw ? Number(minOrderRaw) : null;
+  if (minOrder != null && (!Number.isFinite(minOrder) || minOrder < 0)) {
+    return { ok: false, error: "Minimum order must be a positive amount." };
+  }
+
+  const usageLimitRaw = String(formData.get("usageLimit") ?? "").trim();
+  const usageLimit = usageLimitRaw ? Math.floor(Number(usageLimitRaw)) : null;
+  if (usageLimit != null && (!Number.isFinite(usageLimit) || usageLimit < 1)) {
+    return { ok: false, error: "Usage limit must be a whole number of 1 or more." };
+  }
+
+  const expiresRaw = String(formData.get("expiresAt") ?? "").trim();
+  let expiresAt: Date | null = null;
+  if (expiresRaw) {
+    const d = new Date(expiresRaw);
+    if (Number.isNaN(d.getTime())) return { ok: false, error: "Enter a valid expiry date." };
+    expiresAt = d;
+  }
+
+  return {
+    ok: true,
+    data: {
+      code,
+      description: String(formData.get("description") ?? "").trim() || null,
+      type,
+      value,
+      minOrder,
+      usageLimit,
+      expiresAt,
+      active: formData.get("active") != null,
+      automatic: formData.get("automatic") != null,
+    },
+  };
+}
+
+interface CouponWriteData {
+  code: string;
+  description: string | null;
+  type: DiscountType;
+  value: number;
+  minOrder: number | null;
+  usageLimit: number | null;
+  expiresAt: Date | null;
+  active: boolean;
+  automatic: boolean;
+}
+
+export async function createCoupon(
+  _prev: AdminActionState,
+  formData: FormData
+): Promise<AdminActionState> {
+  await ensureAdmin();
+  const parsed = parseCouponForm(formData);
+  if (!parsed.ok) return { error: parsed.error };
+
+  const existing = await withDbRetry(() =>
+    prisma.coupon.findUnique({ where: { code: parsed.data.code }, select: { id: true } })
+  );
+  if (existing) return { error: "A coupon with that code already exists." };
+
+  await withDbRetry(() => prisma.coupon.create({ data: parsed.data }));
+  revalidatePath("/admin/discounts");
+  redirect("/admin/discounts?flash=coupon-created");
+}
+
+export async function updateCoupon(
+  id: string,
+  _prev: AdminActionState,
+  formData: FormData
+): Promise<AdminActionState> {
+  await ensureAdmin();
+  const parsed = parseCouponForm(formData);
+  if (!parsed.ok) return { error: parsed.error };
+
+  // Guard the unique code against collisions with a *different* coupon.
+  const clash = await withDbRetry(() =>
+    prisma.coupon.findUnique({ where: { code: parsed.data.code }, select: { id: true } })
+  );
+  if (clash && clash.id !== id) return { error: "Another coupon already uses that code." };
+
+  await withDbRetry(() => prisma.coupon.update({ where: { id }, data: parsed.data }));
+  revalidatePath("/admin/discounts");
+  redirect("/admin/discounts?flash=coupon-updated");
+}
+
+export async function toggleCouponActive(id: string): Promise<void> {
+  await ensureAdmin();
+  const coupon = await withDbRetry(() =>
+    prisma.coupon.findUnique({ where: { id }, select: { active: true } })
+  );
+  if (!coupon) return;
+  await withDbRetry(() =>
+    prisma.coupon.update({ where: { id }, data: { active: !coupon.active } })
+  );
+  revalidatePath("/admin/discounts");
+}
+
+export async function deleteCoupon(id: string): Promise<void> {
+  await ensureAdmin();
+  // Past orders reference the coupon (couponId + snapshotted code). Detach them
+  // first so history is preserved, then delete the coupon.
+  await withDbRetry(() =>
+    prisma.$transaction([
+      prisma.order.updateMany({ where: { couponId: id }, data: { couponId: null } }),
+      prisma.coupon.delete({ where: { id } }),
+    ])
+  );
+  revalidatePath("/admin/discounts");
+  redirect("/admin/discounts?flash=coupon-deleted");
+}
+
+// --- Store settings ---------------------------------------------------------
+
+export async function updateStoreSettings(
+  _prev: AdminActionState,
+  formData: FormData
+): Promise<AdminActionState> {
+  // Store details + staff are superadmin-only.
+  await requireRole(["SUPERADMIN"]);
+
+  const data = {
+    storeName: String(formData.get("storeName") ?? "").trim() || "FirstStop",
+    contactEmail: String(formData.get("contactEmail") ?? "").trim(),
+    contactPhone: String(formData.get("contactPhone") ?? "").trim(),
+    deliveryInfo: String(formData.get("deliveryInfo") ?? "").trim(),
+    promoText: String(formData.get("promoText") ?? "").trim(),
+    promoActive: formData.get("promoActive") != null,
+  };
+
+  await withDbRetry(() =>
+    prisma.storeSetting.upsert({
+      where: { id: SETTINGS_ID },
+      create: { id: SETTINGS_ID, ...data },
+      update: data,
+    })
+  );
+
+  revalidatePath("/admin/settings");
+  revalidatePath("/", "layout"); // promo banner is rendered in the root layout
+  return { success: "Store settings saved." };
+}
+
+// --- Staff ------------------------------------------------------------------
+
+export async function createStaff(
+  _prev: AdminActionState,
+  formData: FormData
+): Promise<AdminActionState> {
+  await requireRole(["SUPERADMIN"]);
+
+  const name = String(formData.get("name") ?? "").trim();
+  const email = String(formData.get("email") ?? "").trim().toLowerCase();
+  const password = String(formData.get("password") ?? "");
+  const role: Role =
+    String(formData.get("role") ?? "ADMIN").toUpperCase() === "SUPERADMIN" ? "SUPERADMIN" : "ADMIN";
+  const permissions = sanitizePermissions(formData.getAll("permissions").map(String));
+
+  const fieldErrors: Record<string, string> = {};
+  if (name.length < 2) fieldErrors.name = "Enter a name.";
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) fieldErrors.email = "Enter a valid email.";
+  if (password.length < 8) fieldErrors.password = "Password must be at least 8 characters.";
+  if (Object.keys(fieldErrors).length > 0) return { fieldErrors };
+
+  const existing = await withDbRetry(() =>
+    prisma.user.findUnique({ where: { email }, select: { id: true } })
+  );
+  if (existing) return { fieldErrors: { email: "An account with this email already exists." } };
+
+  const passwordHash = await hashPassword(password);
+  await withDbRetry(() =>
+    prisma.user.create({
+      // Superadmins implicitly have all sections, so we don't store per-section
+      // permissions for them.
+      data: { name, email, passwordHash, role, permissions: role === "SUPERADMIN" ? [] : permissions },
+    })
+  );
+
+  revalidatePath("/admin/settings");
+  redirect("/admin/settings?flash=staff-created");
+}
+
+/** Update a staff member's role and section permissions. */
+export async function updateStaffAccess(staffId: string, formData: FormData): Promise<void> {
+  const admin = await requireRole(["SUPERADMIN"]);
+
+  const role: Role =
+    String(formData.get("role") ?? "ADMIN").toUpperCase() === "SUPERADMIN" ? "SUPERADMIN" : "ADMIN";
+  const permissions = sanitizePermissions(formData.getAll("permissions").map(String));
+
+  // Guard: never let a superadmin demote themselves (avoids locking the store
+  // out of staff management).
+  const nextRole = staffId === admin.id ? "SUPERADMIN" : role;
+
+  await withDbRetry(() =>
+    prisma.user.update({
+      where: { id: staffId },
+      data: { role: nextRole, permissions: nextRole === "SUPERADMIN" ? [] : permissions },
+    })
+  );
+
+  // Role + permissions are read live from the DB on every request (see
+  // getCurrentUser), so the change takes effect immediately — no need to force
+  // a re-login.
+  revalidatePath("/admin/settings");
 }
