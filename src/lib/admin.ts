@@ -84,14 +84,18 @@ export async function getRevenueByDay(
   return [...buckets.entries()].map(([date, revenue]) => ({ date, revenue }));
 }
 
-/** Best-selling products by units sold. */
+/** Best-selling products by units sold, optionally within a date range. */
 export async function getTopProducts(
-  limit = 5
+  limit = 5,
+  range?: { from: Date; to: Date }
 ): Promise<{ id: string; name: string; unitsSold: number }[]> {
   const grouped = await withDbRetry(() =>
     prisma.orderItem.groupBy({
       by: ["productId"],
       _sum: { quantity: true },
+      where: range
+        ? { order: { createdAt: { gte: range.from, lte: range.to } } }
+        : undefined,
       orderBy: { _sum: { quantity: "desc" } },
       take: limit,
     })
@@ -228,4 +232,185 @@ export async function listCustomers(): Promise<CustomerRow[]> {
     createdAt: u.createdAt,
     orderCount: u._count.orders,
   }));
+}
+
+// --- Dashboard date ranges & metrics ---------------------------------------
+
+export type DateRange = { from: Date; to: Date; key: string; label: string };
+
+/** Resolve a dashboard date range from URL params (today / 7d / 30d / 90d /
+ *  custom from+to). Defaults to the last 30 days. */
+export function resolveRange(params: {
+  range?: string;
+  from?: string;
+  to?: string;
+}): DateRange {
+  const now = new Date();
+  const end = new Date(now);
+  end.setHours(23, 59, 59, 999);
+  const today0 = new Date(now);
+  today0.setHours(0, 0, 0, 0);
+  const daysBack = (n: number) => {
+    const f = new Date(today0);
+    f.setDate(f.getDate() - n);
+    return f;
+  };
+
+  if (params.from && params.to) {
+    const from = new Date(params.from);
+    const to = new Date(params.to);
+    if (!isNaN(from.getTime()) && !isNaN(to.getTime()) && from <= to) {
+      from.setHours(0, 0, 0, 0);
+      to.setHours(23, 59, 59, 999);
+      return { from, to, key: "custom", label: `${params.from} → ${params.to}` };
+    }
+  }
+
+  switch (params.range) {
+    case "today":
+      return { from: today0, to: end, key: "today", label: "Today" };
+    case "7d":
+      return { from: daysBack(6), to: end, key: "7d", label: "Last 7 days" };
+    case "90d":
+      return { from: daysBack(89), to: end, key: "90d", label: "Last 90 days" };
+    case "30d":
+    default:
+      return { from: daysBack(29), to: end, key: "30d", label: "Last 30 days" };
+  }
+}
+
+export interface DashboardMetrics {
+  revenue: number;
+  orders: number; // all orders placed in range
+  salesOrders: number; // revenue-generating orders (for AOV)
+  aov: number;
+  customers: number; // total registered customers
+}
+
+export async function getDashboardMetrics(range: DateRange): Promise<DashboardMetrics> {
+  const revenueWhere = {
+    createdAt: { gte: range.from, lte: range.to },
+    status: { in: [...REVENUE_STATUSES] },
+  };
+  const [salesOrders, revenueAgg, allOrders, customers] = await withDbRetry(() =>
+    prisma.$transaction([
+      prisma.order.count({ where: revenueWhere }),
+      prisma.order.aggregate({ _sum: { total: true }, where: revenueWhere }),
+      prisma.order.count({ where: { createdAt: { gte: range.from, lte: range.to } } }),
+      prisma.user.count({ where: { role: "CUSTOMER" } }),
+    ])
+  );
+  const revenue = toNumber(revenueAgg._sum.total);
+  return {
+    revenue,
+    orders: allOrders,
+    salesOrders,
+    aov: salesOrders > 0 ? revenue / salesOrders : 0,
+    customers,
+  };
+}
+
+/** Daily revenue buckets across the range (capped at 92 buckets). */
+export async function getSalesSeries(
+  range: DateRange
+): Promise<{ date: string; revenue: number }[]> {
+  const orders = await withDbRetry(() =>
+    prisma.order.findMany({
+      where: {
+        createdAt: { gte: range.from, lte: range.to },
+        status: { in: [...REVENUE_STATUSES] },
+      },
+      select: { total: true, createdAt: true },
+    })
+  );
+
+  const dayMs = 86_400_000;
+  const start = new Date(range.from);
+  start.setHours(0, 0, 0, 0);
+  const endDay = new Date(range.to);
+  endDay.setHours(0, 0, 0, 0);
+  const days = Math.min(92, Math.max(1, Math.round((endDay.getTime() - start.getTime()) / dayMs) + 1));
+
+  const buckets = new Map<string, number>();
+  for (let i = 0; i < days; i++) {
+    const d = new Date(start);
+    d.setDate(start.getDate() + i);
+    buckets.set(d.toISOString().slice(0, 10), 0);
+  }
+  for (const o of orders) {
+    const key = o.createdAt.toISOString().slice(0, 10);
+    if (buckets.has(key)) buckets.set(key, buckets.get(key)! + toNumber(o.total));
+  }
+  return [...buckets.entries()].map(([date, revenue]) => ({ date, revenue }));
+}
+
+/** Most recent orders for the dashboard panel. */
+export async function getRecentOrders(limit = 8) {
+  return withDbRetry(() =>
+    prisma.order.findMany({
+      orderBy: { createdAt: "desc" },
+      take: limit,
+      select: { id: true, customerName: true, total: true, status: true, createdAt: true },
+    })
+  );
+}
+
+/** Products at or below the low-stock threshold. */
+export async function getLowStockProducts(limit = 8) {
+  return withDbRetry(() =>
+    prisma.product.findMany({
+      where: { deletedAt: null, stock: { lte: LOW_STOCK_THRESHOLD } },
+      orderBy: { stock: "asc" },
+      take: limit,
+      select: { id: true, name: true, slug: true, stock: true },
+    })
+  );
+}
+
+// --- Global admin search ----------------------------------------------------
+
+export async function adminSearch(query: string) {
+  const term = query.trim();
+  if (!term) return { orders: [], products: [], customers: [] };
+
+  const [orders, products, customers] = await withDbRetry(() =>
+    prisma.$transaction([
+      prisma.order.findMany({
+        where: {
+          OR: [
+            { customerName: { contains: term, mode: "insensitive" } },
+            { customerEmail: { contains: term, mode: "insensitive" } },
+            { id: { contains: term.toLowerCase() } },
+          ],
+        },
+        orderBy: { createdAt: "desc" },
+        take: 8,
+        select: { id: true, customerName: true, total: true, status: true, createdAt: true },
+      }),
+      prisma.product.findMany({
+        where: {
+          deletedAt: null,
+          OR: [
+            { name: { contains: term, mode: "insensitive" } },
+            { brand: { name: { contains: term, mode: "insensitive" } } },
+          ],
+        },
+        take: 8,
+        select: { id: true, name: true, slug: true, price: true, stock: true },
+      }),
+      prisma.user.findMany({
+        where: {
+          role: "CUSTOMER",
+          OR: [
+            { name: { contains: term, mode: "insensitive" } },
+            { email: { contains: term, mode: "insensitive" } },
+          ],
+        },
+        take: 8,
+        select: { id: true, name: true, email: true },
+      }),
+    ])
+  );
+
+  return { orders, products, customers };
 }
