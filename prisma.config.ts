@@ -12,6 +12,11 @@ export default defineConfig({
     seed: "tsx prisma/seed.ts",
   },
   datasource: {
-    url: process.env["DATABASE_URL"],
+    // CLI commands (`db push`, `db seed`) perform schema DDL, which is
+    // unreliable over Neon's PgBouncer pooler. Use the DIRECT (unpooled) URL
+    // when provided, falling back to DATABASE_URL for local/dev setups that
+    // have no separate pooler endpoint. The app RUNTIME always uses the pooled
+    // DATABASE_URL (see src/lib/prisma.ts) — this override is CLI-only.
+    url: process.env["DIRECT_URL"] ?? process.env["DATABASE_URL"],
   },
 });
