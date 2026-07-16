@@ -17,6 +17,9 @@ const STYLES: Record<string, string> = {
   DISABLED: "bg-rose-100 text-rose-700",
   DRAFT: "bg-slate-200 text-slate-700",
   ARCHIVED: "bg-slate-200 text-slate-500",
+  // Campaign statuses
+  SCHEDULED: "bg-blue-100 text-blue-800",
+  SENT: "bg-green-100 text-green-800",
 };
 
 function label(status: string): string {

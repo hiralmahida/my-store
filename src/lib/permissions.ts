@@ -19,10 +19,14 @@ export type AdminSection =
   | "inventory"
   | "customers"
   | "discounts"
+  | "transactions"
+  | "campaigns"
+  | "profile"
   | "settings";
 
 /** The sections a staff account can be granted (Settings is superadmin-only,
- *  so it's excluded here — it never appears as a toggle). */
+ *  so it's excluded here — it never appears as a toggle; Dashboard and Profile
+ *  are always available, so they're excluded too). */
 export const GRANTABLE_SECTIONS: { key: AdminSection; label: string }[] = [
   { key: "dashboard", label: "Dashboard" },
   { key: "orders", label: "Orders" },
@@ -30,6 +34,8 @@ export const GRANTABLE_SECTIONS: { key: AdminSection; label: string }[] = [
   { key: "inventory", label: "Inventory" },
   { key: "customers", label: "Customers" },
   { key: "discounts", label: "Discounts" },
+  { key: "transactions", label: "Sales & Payments" },
+  { key: "campaigns", label: "Marketing" },
 ];
 
 const GRANTABLE_KEYS = new Set<string>(GRANTABLE_SECTIONS.map((s) => s.key));
@@ -49,6 +55,7 @@ export function sanitizePermissions(values: string[]): string[] {
 export function canAccess(user: CurrentUser, section: AdminSection): boolean {
   if (user.role === "SUPERADMIN") return true;
   if (section === "settings") return false;
-  if (section === "dashboard") return true;
+  // Dashboard and the personal Profile page are available to every admin.
+  if (section === "dashboard" || section === "profile") return true;
   return user.permissions.includes(section);
 }

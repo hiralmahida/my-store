@@ -13,6 +13,9 @@ import {
   getTopProducts,
   getRecentOrders,
   getLowStockProducts,
+  getMonthlyTarget,
+  getTopCategories,
+  getTrafficSources,
 } from "@/src/lib/admin";
 import { formatQAR } from "@/src/lib/format";
 import StatCard from "./_components/StatCard";
@@ -20,6 +23,9 @@ import StatusBadge from "./_components/StatusBadge";
 import EmptyState from "./_components/EmptyState";
 import DateRangePicker from "./_components/DateRangePicker";
 import SalesChart from "./_components/SalesChart";
+import RadialGauge from "./_components/RadialGauge";
+import TopCategories from "./_components/TopCategories";
+import TrafficSources from "./_components/TrafficSources";
 import { DataTable, Thead, Th, Tbody } from "./_components/DataTable";
 
 export const dynamic = "force-dynamic";
@@ -32,13 +38,17 @@ export default async function AdminDashboard({
 }) {
   const range = resolveRange(await searchParams);
 
-  const [metrics, series, topProducts, recentOrders, lowStock] = await Promise.all([
-    getDashboardMetrics(range),
-    getSalesSeries(range),
-    getTopProducts(5, range),
-    getRecentOrders(8),
-    getLowStockProducts(6),
-  ]);
+  const [metrics, series, topProducts, recentOrders, lowStock, monthlyTarget, topCategories, traffic] =
+    await Promise.all([
+      getDashboardMetrics(range),
+      getSalesSeries(range),
+      getTopProducts(5, range),
+      getRecentOrders(8),
+      getLowStockProducts(6),
+      getMonthlyTarget(),
+      getTopCategories(range, 4),
+      getTrafficSources(range),
+    ]);
 
   return (
     <div className="p-6 sm:p-8">
@@ -58,11 +68,34 @@ export default async function AdminDashboard({
         <StatCard label="Customers" value={String(metrics.customers)} hint="all time" />
       </div>
 
-      {/* Sales chart */}
-      <section className="mt-6 rounded-2xl border border-slate-200 bg-white p-6">
-        <h2 className="mb-4 text-sm font-semibold text-slate-900">Sales over time</h2>
-        <SalesChart series={series} />
-      </section>
+      {/* Monthly target + sales chart */}
+      <div className="mt-6 grid gap-6 lg:grid-cols-3">
+        <section className="rounded-2xl border border-slate-200 bg-white p-6">
+          <h2 className="mb-4 text-sm font-semibold text-slate-900">Monthly target</h2>
+          <RadialGauge
+            pct={monthlyTarget.pct}
+            target={monthlyTarget.target}
+            revenue={monthlyTarget.revenue}
+            today={monthlyTarget.today}
+          />
+        </section>
+        <section className="rounded-2xl border border-slate-200 bg-white p-6 lg:col-span-2">
+          <h2 className="mb-4 text-sm font-semibold text-slate-900">Sales over time</h2>
+          <SalesChart series={series} />
+        </section>
+      </div>
+
+      {/* Top categories + traffic sources */}
+      <div className="mt-6 grid gap-6 lg:grid-cols-3">
+        <section className="rounded-2xl border border-slate-200 bg-white p-6 lg:col-span-2">
+          <h2 className="mb-4 text-sm font-semibold text-slate-900">Top categories</h2>
+          <TopCategories categories={topCategories} />
+        </section>
+        <section className="rounded-2xl border border-slate-200 bg-white p-6">
+          <h2 className="mb-4 text-sm font-semibold text-slate-900">Traffic sources</h2>
+          <TrafficSources total={traffic.total} sources={traffic.sources} />
+        </section>
+      </div>
 
       <div className="mt-6 grid gap-6 lg:grid-cols-3">
         {/* Recent orders */}

@@ -32,21 +32,32 @@ const IconLogout = svg(<><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" /><pa
 const IconChevron = svg(<path d="M9 18l6-6-6-6" />);
 const IconMenu = svg(<><path d="M3 12h18" /><path d="M3 6h18" /><path d="M3 18h18" /></>);
 const IconSearch = svg(<><circle cx="11" cy="11" r="7" /><path d="m21 21-4.3-4.3" /></>);
+const IconLayers = svg(<><path d="m12 2 9 5-9 5-9-5 9-5z" /><path d="m3 12 9 5 9-5" /><path d="m3 17 9 5 9-5" /></>);
+const IconCard = svg(<><rect x="2" y="5" width="20" height="14" rx="2" /><path d="M2 10h20" /></>);
+const IconFile = svg(<><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><path d="M14 2v6h6" /><path d="M9 13h6" /><path d="M9 17h6" /></>);
+const IconMegaphone = svg(<><path d="m3 11 15-7v16l-6-2.8" /><path d="M3 11v4a1 1 0 0 0 1 1h8V10H4a1 1 0 0 0-1 1z" /><path d="M8 16v4" /></>);
+const IconUser = svg(<><circle cx="12" cy="8" r="4" /><path d="M4 21v-1a6 6 0 0 1 6-6h4a6 6 0 0 1 6 6v1" /></>);
 
 const NAV: {
   href: string;
   label: string;
   icon: (p: { className?: string }) => React.ReactNode;
   section: string;
+  group: string;
   exact?: boolean;
 }[] = [
-  { href: "/admin", label: "Dashboard", icon: IconHome, section: "dashboard", exact: true },
-  { href: "/admin/orders", label: "Orders", icon: IconBag, section: "orders" },
-  { href: "/admin/products", label: "Products", icon: IconTag, section: "products" },
-  { href: "/admin/inventory", label: "Inventory", icon: IconBoxes, section: "inventory" },
-  { href: "/admin/customers", label: "Customers", icon: IconUsers, section: "customers" },
-  { href: "/admin/discounts", label: "Discounts", icon: IconTicket, section: "discounts" },
-  { href: "/admin/settings", label: "Settings", icon: IconCog, section: "settings" },
+  { href: "/admin", label: "Dashboard", icon: IconHome, section: "dashboard", group: "General", exact: true },
+  { href: "/admin/orders", label: "Orders", icon: IconBag, section: "orders", group: "Sales" },
+  { href: "/admin/transactions", label: "Transactions", icon: IconCard, section: "transactions", group: "Sales" },
+  { href: "/admin/invoices", label: "Invoices", icon: IconFile, section: "transactions", group: "Sales" },
+  { href: "/admin/products", label: "Products", icon: IconTag, section: "products", group: "Catalog" },
+  { href: "/admin/categories", label: "Categories", icon: IconLayers, section: "products", group: "Catalog" },
+  { href: "/admin/inventory", label: "Inventory", icon: IconBoxes, section: "inventory", group: "Catalog" },
+  { href: "/admin/customers", label: "Customers", icon: IconUsers, section: "customers", group: "Customers" },
+  { href: "/admin/discounts", label: "Discounts", icon: IconTicket, section: "discounts", group: "Marketing" },
+  { href: "/admin/campaigns", label: "Campaigns", icon: IconMegaphone, section: "campaigns", group: "Marketing" },
+  { href: "/admin/settings", label: "Settings", icon: IconCog, section: "settings", group: "Account" },
+  { href: "/admin/profile", label: "Profile", icon: IconUser, section: "profile", group: "Account" },
 ];
 
 export default function AdminShell({
@@ -71,25 +82,48 @@ export default function AdminShell({
   const allowed = new Set(sections);
   const visibleNav = NAV.filter((item) => allowed.has(item.section));
 
+  // Preserve NAV order while collecting each group's visible items.
+  const groups: { name: string; items: typeof visibleNav }[] = [];
+  for (const item of visibleNav) {
+    let group = groups.find((g) => g.name === item.group);
+    if (!group) {
+      group = { name: item.group, items: [] };
+      groups.push(group);
+    }
+    group.items.push(item);
+  }
+
   const navList = (
-    <nav className="flex-1 space-y-1 px-3">
-      {visibleNav.map(({ href, label, icon: Icon, exact }) => {
-        const active = isActive(href, exact);
-        return (
-          <Link
-            key={href}
-            href={href}
-            onClick={() => setMobileOpen(false)}
-            title={collapsed ? label : undefined}
-            className={`flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition ${
-              active ? "bg-blue-600 text-white" : "text-slate-300 hover:bg-slate-800 hover:text-white"
+    <nav className="flex-1 space-y-4 overflow-y-auto px-3">
+      {groups.map((group) => (
+        <div key={group.name} className="space-y-1">
+          <p
+            className={`px-3 pb-0.5 text-[10px] font-semibold uppercase tracking-wider text-slate-500 ${
+              collapsed ? "lg:hidden" : ""
             }`}
           >
-            <Icon className="h-5 w-5 shrink-0" />
-            <span className={collapsed ? "lg:hidden" : ""}>{label}</span>
-          </Link>
-        );
-      })}
+            {group.name}
+          </p>
+          {group.items.map(({ href, label, icon: Icon, exact }) => {
+            const active = isActive(href, exact);
+            return (
+              <Link
+                key={href}
+                href={href}
+                onClick={() => setMobileOpen(false)}
+                title={collapsed ? label : undefined}
+                aria-current={active ? "page" : undefined}
+                className={`flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition ${
+                  active ? "bg-blue-600 text-white" : "text-slate-300 hover:bg-slate-800 hover:text-white"
+                }`}
+              >
+                <Icon className="h-5 w-5 shrink-0" />
+                <span className={collapsed ? "lg:hidden" : ""}>{label}</span>
+              </Link>
+            );
+          })}
+        </div>
+      ))}
     </nav>
   );
 

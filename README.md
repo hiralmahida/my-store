@@ -55,6 +55,45 @@ Sign in as the admin to reach the panel at **`/admin`**.
 `4000 0000 0000 0002` to simulate a decline (any future expiry + 3-digit CVC),
 or choose **Pay in 4**. Payments are simulated — no real charge.
 
+## Admin panel
+
+The panel lives under **`/admin`** (role-gated: `ADMIN` / `SUPERADMIN`). The
+collapsible sidebar groups the sections; staff see only the sections a
+superadmin has granted them (see `src/lib/permissions.ts`).
+
+| Group     | Route                     | What it does                                                        |
+| --------- | ------------------------- | ------------------------------------------------------------------ |
+| General   | `/admin`                  | Dashboard: KPIs, monthly-target gauge, top categories, traffic sources, sales chart, recent orders, low stock |
+| Sales     | `/admin/orders`           | Orders list (search / sort / filter / paginate) → `/admin/orders/[id]` details, `/…/invoice`, CSV export |
+| Sales     | `/admin/transactions`     | Payments across all orders — status/method filters, search, success volume |
+| Sales     | `/admin/invoices`         | One invoice per order → printable single-invoice view              |
+| Catalog   | `/admin/products`         | Products grid/table, `/new`, `/[id]` edit + details                |
+| Catalog   | `/admin/categories`       | Category CRUD (`/new`, `/[id]`) with product counts + parent nesting |
+| Catalog   | `/admin/inventory`        | Stock levels + adjustment history                                  |
+| Customers | `/admin/customers`        | Customer list → `/admin/customers/[id]` profile                    |
+| Marketing | `/admin/discounts`        | Coupons CRUD (`/new`, `/[id]`)                                     |
+| Marketing | `/admin/campaigns`        | Email campaigns CRUD (`/new`, `/[id]`) — draft / schedule / send   |
+| Account   | `/admin/settings`         | Store details + staff Roles & Permissions (superadmin only)        |
+| Account   | `/admin/profile`          | The signed-in admin's own name / email / password                 |
+
+### Where to plug in a real API
+
+Everything is backed by real data (Prisma/Postgres) except **email campaigns**,
+which use a typed in-memory mock. Swap points, one file each:
+
+- **Campaigns** — `src/lib/campaigns.ts`. Reimplement `listCampaigns`,
+  `getCampaign`, `createCampaign`, `updateCampaign`, `sendCampaign`,
+  `deleteCampaign` against a real backend (or add a `Campaign` Prisma model) and
+  delete the seed array; the signatures already match a real data layer.
+- **Traffic sources** — `getTrafficSources` in `src/lib/admin.ts` returns a
+  derived, deterministic breakdown (the store has no analytics pipeline).
+  Replace that one function with a real analytics query.
+- **Monthly target** — `getMonthlyTarget` in `src/lib/admin.ts` derives the goal
+  from last month's revenue; add a `StoreSetting` field to make it explicit.
+
+All other admin reads live in `src/lib/admin.ts` and writes in
+`app/admin/actions.ts` (plus `app/admin/*/actions.ts`) — already real Prisma.
+
 ## Environment variables
 
 | Variable       | Required | Description                                             |

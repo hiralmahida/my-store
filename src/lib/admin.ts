@@ -932,6 +932,391 @@ export async function getLowStockProducts(limit = 8) {
   );
 }
 
+// --- Dashboard: Monthly target, categories & traffic ------------------------
+
+export interface MonthlyTarget {
+  target: number; // revenue goal for the current calendar month (QAR)
+  revenue: number; // revenue booked so far this month
+  today: number; // revenue booked today
+  pct: number; // revenue / target, clamped to 0–100 for the gauge
+}
+
+/**
+ * Progress toward this calendar month's revenue goal. There's no stored target,
+ * so we derive a sensible one from last month's takings (×1.2, rounded up to a
+ * tidy figure, with a floor) — swap in a StoreSetting field to make it explicit.
+ */
+export async function getMonthlyTarget(): Promise<MonthlyTarget> {
+  const now = new Date();
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+  const prevMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+  const today0 = startOfToday();
+
+  const revenueWhere = (from: Date, to?: Date) => ({
+    createdAt: to ? { gte: from, lt: to } : { gte: from },
+    status: { in: [...REVENUE_STATUSES] },
+  });
+
+  const [monthAgg, todayAgg, prevAgg] = await withDbRetry(() =>
+    prisma.$transaction([
+      prisma.order.aggregate({ _sum: { total: true }, where: revenueWhere(monthStart) }),
+      prisma.order.aggregate({ _sum: { total: true }, where: revenueWhere(today0) }),
+      prisma.order.aggregate({
+        _sum: { total: true },
+        where: revenueWhere(prevMonthStart, monthStart),
+      }),
+    ])
+  );
+
+  const revenue = toNumber(monthAgg._sum.total);
+  const today = toNumber(todayAgg._sum.total);
+  const prev = toNumber(prevAgg._sum.total);
+
+  // Derive the goal from last month, rounded up to the nearest 1,000 QAR.
+  const rawTarget = Math.max(prev * 1.2, revenue * 1.1, 50_000);
+  const target = Math.max(1000, Math.ceil(rawTarget / 1000) * 1000);
+  const pct = target > 0 ? Math.min(100, Math.round((revenue / target) * 100)) : 0;
+
+  return { target, revenue, today, pct };
+}
+
+export interface TopCategory {
+  name: string;
+  revenue: number; // revenue in range (QAR)
+  changePct: number | null; // vs the previous equal-length period (null = new)
+}
+
+/**
+ * Best-selling categories by revenue within the range, each with its change
+ * vs the immediately preceding equal-length period. Prisma can't group by a
+ * relation column, so we sum line items in memory (bounded by `take`).
+ */
+export async function getTopCategories(range: DateRange, limit = 4): Promise<TopCategory[]> {
+  const spanMs = range.to.getTime() - range.from.getTime();
+  const prevFrom = new Date(range.from.getTime() - spanMs - 1);
+  const prevTo = new Date(range.from.getTime() - 1);
+
+  const select = {
+    quantity: true,
+    unitPrice: true,
+    product: { select: { category: { select: { name: true } } } },
+  } as const;
+
+  const [current, previous] = await withDbRetry(() =>
+    prisma.$transaction([
+      prisma.orderItem.findMany({
+        where: {
+          order: { createdAt: { gte: range.from, lte: range.to }, status: { in: [...REVENUE_STATUSES] } },
+        },
+        select,
+        take: 5000,
+      }),
+      prisma.orderItem.findMany({
+        where: {
+          order: { createdAt: { gte: prevFrom, lte: prevTo }, status: { in: [...REVENUE_STATUSES] } },
+        },
+        select,
+        take: 5000,
+      }),
+    ])
+  );
+
+  const sumByCategory = (items: typeof current) => {
+    const map = new Map<string, number>();
+    for (const it of items) {
+      const name = it.product.category.name;
+      map.set(name, (map.get(name) ?? 0) + toNumber(it.unitPrice) * it.quantity);
+    }
+    return map;
+  };
+
+  const now = sumByCategory(current);
+  const before = sumByCategory(previous);
+
+  return [...now.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, limit)
+    .map(([name, revenue]) => {
+      const prev = before.get(name) ?? 0;
+      const changePct = prev > 0 ? Math.round(((revenue - prev) / prev) * 100) : null;
+      return { name, revenue, changePct };
+    });
+}
+
+export interface TrafficSource {
+  name: string;
+  value: number; // sessions attributed to the source
+  pct: number; // share of total sessions (0–100)
+}
+
+/**
+ * Traffic-source breakdown for the range. The store has no analytics pipeline,
+ * so this is DERIVED, deterministic mock data: total sessions scale with real
+ * order volume in the range, split across channels by fixed weights (seeded by
+ * the range so the mix stays stable between renders). Replace with real
+ * analytics by swapping this one function.
+ */
+export async function getTrafficSources(range: DateRange): Promise<{ total: number; sources: TrafficSource[] }> {
+  const orders = await withDbRetry(() =>
+    prisma.order.count({ where: { createdAt: { gte: range.from, lte: range.to } } })
+  );
+
+  // Assume a ~2.5% order conversion rate to back into a plausible session count.
+  const total = Math.max(120, Math.round(orders / 0.025));
+
+  const weights: { name: string; weight: number }[] = [
+    { name: "Direct", weight: 32 },
+    { name: "Google", weight: 28 },
+    { name: "Social", weight: 20 },
+    { name: "Referral", weight: 12 },
+    { name: "Campaigns", weight: 8 },
+  ];
+
+  // A tiny, deterministic wobble seeded by the range length so the split looks
+  // organic without changing on every request.
+  const days = Math.max(1, Math.round((range.to.getTime() - range.from.getTime()) / 86_400_000));
+  const wobble = (i: number) => ((days * (i + 3)) % 7) - 3; // -3..+3
+
+  const adjusted = weights.map((w, i) => ({ ...w, weight: Math.max(1, w.weight + wobble(i)) }));
+  const weightSum = adjusted.reduce((s, w) => s + w.weight, 0);
+
+  const sources = adjusted.map((w) => {
+    const pct = Math.round((w.weight / weightSum) * 100);
+    return { name: w.name, value: Math.round((w.weight / weightSum) * total), pct };
+  });
+
+  return { total, sources };
+}
+
+// --- Transactions & invoices ------------------------------------------------
+
+export const PAYMENT_STATUSES = ["PENDING", "SUCCEEDED", "FAILED"] as const;
+export const PAYMENT_METHODS = ["CARD", "BNPL"] as const;
+
+export interface TransactionListParams {
+  q?: string;
+  status?: string; // one of PAYMENT_STATUSES
+  method?: string; // one of PAYMENT_METHODS
+  page?: number;
+  perPage?: number;
+}
+
+export interface TransactionRow {
+  id: string;
+  orderId: string;
+  customerName: string;
+  method: string;
+  provider: string;
+  reference: string;
+  amount: number;
+  status: string;
+  createdAt: Date;
+}
+
+export interface TransactionListResult {
+  rows: TransactionRow[];
+  total: number;
+  page: number;
+  perPage: number;
+  totalPages: number;
+  counts: { all: number; succeeded: number; pending: number; failed: number };
+  volume: number; // total QAR of SUCCEEDED payments matching the filter
+}
+
+function buildPaymentWhere(params: TransactionListParams): Prisma.PaymentWhereInput {
+  const where: Prisma.PaymentWhereInput = {};
+  if (params.status && (PAYMENT_STATUSES as readonly string[]).includes(params.status)) {
+    where.status = params.status as Prisma.PaymentWhereInput["status"];
+  }
+  if (params.method && (PAYMENT_METHODS as readonly string[]).includes(params.method)) {
+    where.method = params.method as Prisma.PaymentWhereInput["method"];
+  }
+  const q = params.q?.trim();
+  if (q) {
+    where.OR = [
+      { reference: { contains: q, mode: "insensitive" } },
+      { orderId: { contains: q.toLowerCase() } },
+      { order: { customerName: { contains: q, mode: "insensitive" } } },
+    ];
+  }
+  return where;
+}
+
+/** Payments list for the Sales & Payments → Transactions view. */
+export async function listTransactions(
+  params: TransactionListParams = {}
+): Promise<TransactionListResult> {
+  const page = Math.max(1, Math.floor(params.page ?? 1));
+  const perPage = Math.min(100, Math.max(5, Math.floor(params.perPage ?? 20)));
+  const where = buildPaymentWhere(params);
+
+  const [payments, total, grouped, volumeAgg] = await withDbRetry(() =>
+    prisma.$transaction([
+      prisma.payment.findMany({
+        where,
+        include: { order: { select: { customerName: true } } },
+        orderBy: { createdAt: "desc" },
+        skip: (page - 1) * perPage,
+        take: perPage,
+      }),
+      prisma.payment.count({ where }),
+      prisma.payment.groupBy({ by: ["status"], _count: true }),
+      prisma.payment.aggregate({ _sum: { amount: true }, where: { ...where, status: "SUCCEEDED" } }),
+    ])
+  );
+
+  const byStatus = new Map(grouped.map((g) => [g.status, g._count]));
+
+  return {
+    rows: payments.map((p) => ({
+      id: p.id,
+      orderId: p.orderId,
+      customerName: p.order.customerName,
+      method: p.method,
+      provider: p.provider,
+      reference: p.reference,
+      amount: toNumber(p.amount),
+      status: p.status,
+      createdAt: p.createdAt,
+    })),
+    total,
+    page,
+    perPage,
+    totalPages: Math.max(1, Math.ceil(total / perPage)),
+    counts: {
+      all: [...byStatus.values()].reduce((s, n) => s + n, 0),
+      succeeded: byStatus.get("SUCCEEDED") ?? 0,
+      pending: byStatus.get("PENDING") ?? 0,
+      failed: byStatus.get("FAILED") ?? 0,
+    },
+    volume: toNumber(volumeAgg._sum.amount),
+  };
+}
+
+export interface InvoiceListParams {
+  q?: string;
+  page?: number;
+  perPage?: number;
+}
+
+export interface InvoiceRow {
+  orderId: string;
+  number: string; // human invoice number derived from the order id
+  customerName: string;
+  customerEmail: string;
+  total: number;
+  status: string;
+  paymentStatus: string | null;
+  createdAt: Date;
+}
+
+export interface InvoiceListResult {
+  rows: InvoiceRow[];
+  total: number;
+  page: number;
+  perPage: number;
+  totalPages: number;
+  billed: number; // total QAR billed across matching invoices
+}
+
+/** Invoice number derived from an order id, e.g. "INV-9F3A1C2D". */
+export function invoiceNumber(orderId: string): string {
+  return `INV-${orderId.slice(-8).toUpperCase()}`;
+}
+
+/**
+ * Invoices list for Sales & Payments → Invoices. Every order is billable, so
+ * this lists orders (newest first) with their payment status; each links to the
+ * existing printable invoice at /admin/orders/[id]/invoice.
+ */
+export async function listInvoices(params: InvoiceListParams = {}): Promise<InvoiceListResult> {
+  const page = Math.max(1, Math.floor(params.page ?? 1));
+  const perPage = Math.min(100, Math.max(5, Math.floor(params.perPage ?? 20)));
+
+  const where: Prisma.OrderWhereInput = {};
+  const q = params.q?.trim();
+  if (q) {
+    where.OR = [
+      { customerName: { contains: q, mode: "insensitive" } },
+      { customerEmail: { contains: q, mode: "insensitive" } },
+      { id: { contains: q.toLowerCase() } },
+    ];
+  }
+
+  const [orders, total, billedAgg] = await withDbRetry(() =>
+    prisma.$transaction([
+      prisma.order.findMany({
+        where,
+        include: { payment: { select: { status: true } } },
+        orderBy: { createdAt: "desc" },
+        skip: (page - 1) * perPage,
+        take: perPage,
+      }),
+      prisma.order.count({ where }),
+      prisma.order.aggregate({ _sum: { total: true }, where }),
+    ])
+  );
+
+  return {
+    rows: orders.map((o) => ({
+      orderId: o.id,
+      number: invoiceNumber(o.id),
+      customerName: o.customerName,
+      customerEmail: o.customerEmail,
+      total: toNumber(o.total),
+      status: o.status,
+      paymentStatus: o.payment?.status ?? null,
+      createdAt: o.createdAt,
+    })),
+    total,
+    page,
+    perPage,
+    totalPages: Math.max(1, Math.ceil(total / perPage)),
+    billed: toNumber(billedAgg._sum.total),
+  };
+}
+
+// --- Categories -------------------------------------------------------------
+
+export interface AdminCategoryRow {
+  id: string;
+  name: string;
+  slug: string;
+  image: string | null;
+  parentId: string | null;
+  parentName: string | null;
+  productCount: number;
+  createdAt: Date;
+}
+
+/** All categories with product counts and parent names, for the categories admin. */
+export async function listAdminCategories(): Promise<AdminCategoryRow[]> {
+  const categories = await withDbRetry(() =>
+    prisma.category.findMany({
+      orderBy: { name: "asc" },
+      include: {
+        parent: { select: { name: true } },
+        _count: { select: { products: true } },
+      },
+    })
+  );
+
+  return categories.map((c) => ({
+    id: c.id,
+    name: c.name,
+    slug: c.slug,
+    image: c.image,
+    parentId: c.parentId,
+    parentName: c.parent?.name ?? null,
+    productCount: c._count.products,
+    createdAt: c.createdAt,
+  }));
+}
+
+export async function getAdminCategory(id: string) {
+  return withDbRetry(() => prisma.category.findUnique({ where: { id } }));
+}
+
 // --- Global admin search ----------------------------------------------------
 
 export async function adminSearch(query: string) {

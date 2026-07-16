@@ -16,6 +16,9 @@ const ALL_SECTIONS: AdminSection[] = [
   "inventory",
   "customers",
   "discounts",
+  "transactions",
+  "campaigns",
+  "profile",
   "settings",
 ];
 

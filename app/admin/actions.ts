@@ -787,6 +787,96 @@ export async function deleteCoupon(id: string): Promise<void> {
   redirect("/admin/discounts?flash=coupon-deleted");
 }
 
+// --- Categories -------------------------------------------------------------
+
+interface CategoryWriteData {
+  name: string;
+  slug: string;
+  image: string | null;
+  parentId: string | null;
+}
+
+/** Parse + validate the shared category form. `selfId` is the id being edited
+ *  (so a category can't be set as its own parent). */
+function parseCategoryForm(
+  formData: FormData,
+  selfId?: string
+): { ok: true; data: CategoryWriteData } | { ok: false; fieldErrors: Record<string, string> } {
+  const name = String(formData.get("name") ?? "").trim();
+  const slugRaw = String(formData.get("slug") ?? "").trim();
+  const slug = slugRaw ? slugify(slugRaw) : slugify(name);
+  const image = String(formData.get("image") ?? "").trim() || null;
+  const parentRaw = String(formData.get("parentId") ?? "").trim();
+  const parentId = parentRaw || null;
+
+  const fieldErrors: Record<string, string> = {};
+  if (name.length < 2) fieldErrors.name = "Enter a category name.";
+  if (!slug) fieldErrors.slug = "Enter a valid slug.";
+  if (parentId && parentId === selfId) fieldErrors.parentId = "A category can't be its own parent.";
+
+  if (Object.keys(fieldErrors).length > 0) return { ok: false, fieldErrors };
+  return { ok: true, data: { name, slug, image, parentId } };
+}
+
+export async function createCategory(
+  _prev: AdminActionState,
+  formData: FormData
+): Promise<AdminActionState> {
+  await ensureAdmin();
+  const parsed = parseCategoryForm(formData);
+  if (!parsed.ok) return { fieldErrors: parsed.fieldErrors };
+
+  const clash = await withDbRetry(() =>
+    prisma.category.findUnique({ where: { slug: parsed.data.slug }, select: { id: true } })
+  );
+  if (clash) return { fieldErrors: { slug: "A category with this slug already exists." } };
+
+  await withDbRetry(() => prisma.category.create({ data: parsed.data }));
+  revalidatePath("/admin/categories");
+  redirect("/admin/categories?flash=category-created");
+}
+
+export async function updateCategory(
+  id: string,
+  _prev: AdminActionState,
+  formData: FormData
+): Promise<AdminActionState> {
+  await ensureAdmin();
+  const parsed = parseCategoryForm(formData, id);
+  if (!parsed.ok) return { fieldErrors: parsed.fieldErrors };
+
+  const clash = await withDbRetry(() =>
+    prisma.category.findUnique({ where: { slug: parsed.data.slug }, select: { id: true } })
+  );
+  if (clash && clash.id !== id) {
+    return { fieldErrors: { slug: "Another category already uses this slug." } };
+  }
+
+  await withDbRetry(() => prisma.category.update({ where: { id }, data: parsed.data }));
+  revalidatePath("/admin/categories");
+  redirect("/admin/categories?flash=category-updated");
+}
+
+/** Delete a category. Blocked (with a flash message) if it still has products
+ *  or child categories, to preserve referential integrity. */
+export async function deleteCategory(id: string): Promise<void> {
+  await ensureAdmin();
+  const category = await withDbRetry(() =>
+    prisma.category.findUnique({
+      where: { id },
+      select: { _count: { select: { products: true, children: true } } },
+    })
+  );
+  if (!category) redirect("/admin/categories");
+  if (category._count.products > 0 || category._count.children > 0) {
+    redirect("/admin/categories?flash=category-in-use");
+  }
+
+  await withDbRetry(() => prisma.category.delete({ where: { id } }));
+  revalidatePath("/admin/categories");
+  redirect("/admin/categories?flash=category-deleted");
+}
+
 // --- Store settings ---------------------------------------------------------
 
 export async function updateStoreSettings(
