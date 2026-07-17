@@ -1003,6 +1003,26 @@ async function main() {
   //    touch catalog stock (that only changes at live checkout).
   const ordersCreated = await seedOrderHistory(createdProducts, customerUsers);
 
+  // 6. Ensure the store-settings singleton exists (id "singleton" — matches the
+  //    schema default and src/lib/settings.ts SETTINGS_ID). Without this row,
+  //    getStoreSettings() creates it lazily on first request, which races under
+  //    concurrent RSC renders on a fresh DB (P2002). Upsert keeps the seed
+  //    idempotent: re-running refreshes the demo values without erroring.
+  const storeSettings = {
+    storeName: "FirstStop",
+    contactEmail: "support@firststop.qa",
+    contactPhone: "+974 4000 0000",
+    deliveryInfo:
+      "Free delivery across Qatar on orders over QAR 500. Same-day delivery in Doha.",
+    promoText: "Free delivery on orders over QAR 500 🚚",
+    promoActive: true,
+  };
+  await prisma.storeSetting.upsert({
+    where: { id: "singleton" },
+    create: { id: "singleton", ...storeSettings },
+    update: storeSettings,
+  });
+
   console.log(
     `✅  Seeded ${categories.length} categories, ${brands.length} brands, ` +
       `${products.length} products, ${demoUsers.length} users, ${ordersCreated} orders.`
